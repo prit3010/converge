@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Converge UI</title>
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-block">
+      <div class="brand">converge</div>
+      <div class="brand-sub">winner cockpit + lineage proof</div>
+    </div>
+
+    <div class="controls">
+      <label for="branch-select">Branch</label>
+      <select id="branch-select"></select>
+    </div>
+  </header>
+
+  <div class="mobile-tabs" role="tablist" aria-label="Main sections">
+    <button
+      type="button"
+      id="tab-lineage"
+      class="tab-btn active"
+      data-panel="lineage"
+      role="tab"
+      aria-selected="true"
+      aria-controls="lineage-panel"
+      tabindex="0"
+    >
+      Lineage
+    </button>
+    <button
+      type="button"
+      id="tab-winner"
+      class="tab-btn"
+      data-panel="winner"
+      role="tab"
+      aria-selected="false"
+      aria-controls="winner-panel"
+      tabindex="-1"
+    >
+      Winner
+    </button>
+  </div>
+
+  <main class="experience show-lineage" id="experience">
+    <section class="winner-panel" id="winner-panel" role="tabpanel" aria-labelledby="tab-winner">
+      <div class="winner-cockpit" id="winner-cockpit">
+        <div class="winner-hero loading" id="winner-hero">Calculating best attempt...</div>
+        <div class="winner-kpis" id="winner-kpis" aria-live="polite"></div>
+        <div class="winner-reason" id="winner-reason"></div>
+
+        <div class="winner-actions">
+          <button type="button" class="action-btn" id="quick-compare">Winner vs Baseline</button>
+          <span class="action-hint">Shift+click two nodes is still available for instant compare.</span>
+        </div>
+
+        <div class="compare-controls" aria-label="Compare controls">
+          <div class="compare-field">
+            <label for="compare-a-select">Select A</label>
+            <select id="compare-a-select"></select>
+          </div>
+          <div class="compare-field">
+            <label for="compare-b-select">Select B</label>
+            <select id="compare-b-select"></select>
+          </div>
+          <button type="button" class="action-btn" id="compare-run">Compare</button>
+        </div>
+      </div>
+
+      <section class="detail-panel" id="detail-panel" aria-live="polite">
+        <div class="placeholder">Winner insights will appear here. Click a node for details.</div>
+      </section>
+    </section>
+
+    <section class="lineage-panel" id="lineage-panel" role="tabpanel" aria-labelledby="tab-lineage">
+      <div class="lineage-toolbar" aria-label="Graph controls">
+        <div class="toolbar-col">
+          <div class="tool-group">
+            <button type="button" class="tool-btn" id="preset-winner">Winner</button>
+            <button type="button" class="tool-btn" id="preset-active">Active Branch</button>
+            <button type="button" class="tool-btn" id="preset-all">All</button>
+          </div>
+          <div class="tool-group">
+            <button type="button" class="tool-btn" id="zoom-fit">Fit</button>
+            <button type="button" class="tool-btn" id="zoom-reset">Reset</button>
+            <button type="button" class="tool-btn" id="zoom-out">-</button>
+            <div class="zoom-level" id="zoom-level">100%</div>
+            <button type="button" class="tool-btn" id="zoom-in">+</button>
+          </div>
+        </div>
+
+        <div class="toolbar-col align-right">
+          <button type="button" class="lineage-toggle" id="lineage-toggle">Show full lineage</button>
+          <div class="state-legend" aria-label="Task status legend">
+            <span class="legend-item pass">Pass</span>
+            <span class="legend-item warn">Warn</span>
+            <span class="legend-item fail">Fail</span>
+            <span class="legend-item none">None</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="graph-shell">
+        <svg id="dag" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
