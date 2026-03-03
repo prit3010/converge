@@ -28,10 +28,13 @@ jobs:
         run: go build ./...
 
       - name: Validate tap token
-        if: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN == '' }}
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          echo "HOMEBREW_TAP_GITHUB_TOKEN is required for Homebrew Cask publishing." >&2
-          exit 1
+          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_GITHUB_TOKEN is required for Homebrew Cask publishing." >&2
+            exit 1
+          fi
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
