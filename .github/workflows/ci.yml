@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+      - name: Verify gofmt
+        run: |
+          set -euo pipefail
+          files=$(git ls-files '*.go')
+          if [ -z "$files" ]; then
+            exit 0
+          fi
+          unformatted=$(gofmt -l $files)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-formatted:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+      - name: Run tests
+        run: go test ./...
+
+  vet-build:
+    name: vet-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+      - name: Go vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+
+  race:
+    name: race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+      - name: Race tests
+        run: go test -race ./...

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/db"
+	"github.com/prit3010/converge/internal/db"
 	"github.com/spf13/cobra"
 )
 

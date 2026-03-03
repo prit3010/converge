@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prittamravi/converge/internal/config"
-	"github.com/prittamravi/converge/internal/core"
-	"github.com/prittamravi/converge/internal/watch"
+	"github.com/prit3010/converge/internal/config"
+	"github.com/prit3010/converge/internal/core"
+	"github.com/prit3010/converge/internal/watch"
 	"github.com/spf13/cobra"
 )
 

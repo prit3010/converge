@@ -1,0 +1,80 @@
+version: 2
+
+project_name: converge
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: converge-darwin
+    main: ./cmd/converge
+    binary: converge
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/prit3010/converge/internal/cli.Version={{ .Version }} -X github.com/prit3010/converge/internal/cli.Commit={{ .Commit }} -X github.com/prit3010/converge/internal/cli.BuildDate={{ .Date }}
+
+  - id: converge-linux
+    main: ./cmd/converge
+    binary: converge
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/prit3010/converge/internal/cli.Version={{ .Version }} -X github.com/prit3010/converge/internal/cli.Commit={{ .Commit }} -X github.com/prit3010/converge/internal/cli.BuildDate={{ .Date }}
+
+archives:
+  - id: macos
+    ids:
+      - converge-darwin
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+  - id: linux
+    ids:
+      - converge-linux
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+homebrew_casks:
+  - name: converge
+    ids:
+      - macos
+    binaries:
+      - converge
+    repository:
+      owner: prit3010
+      name: homebrew-converge
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/prit3010/converge
+    description: Local-first experiment tracker for AI-assisted coding workflows
+    license: MIT
+    commit_author:
+      name: converge-bot
+      email: bot@users.noreply.github.com
+    url:
+      verified: github.com/prit3010/converge/

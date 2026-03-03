@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/core"
-	"github.com/prittamravi/converge/internal/snapshot"
+	"github.com/prit3010/converge/internal/core"
+	"github.com/prit3010/converge/internal/snapshot"
 	"github.com/spf13/cobra"
 )
 

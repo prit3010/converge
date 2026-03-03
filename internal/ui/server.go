@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 
-	"github.com/prittamravi/converge/internal/core"
+	"github.com/prit3010/converge/internal/core"
 )
 
 type Server struct {

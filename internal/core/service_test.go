@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/prittamravi/converge/internal/db"
-	"github.com/prittamravi/converge/internal/eval"
-	"github.com/prittamravi/converge/internal/store"
+	"github.com/prit3010/converge/internal/db"
+	"github.com/prit3010/converge/internal/eval"
+	"github.com/prit3010/converge/internal/store"
 )
 
 func TestCreateCellSequenceAndParent(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/ui"
+	"github.com/prit3010/converge/internal/ui"
 	"github.com/spf13/cobra"
 )
 

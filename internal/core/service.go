@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prittamravi/converge/internal/config"
-	"github.com/prittamravi/converge/internal/db"
-	"github.com/prittamravi/converge/internal/eval"
-	"github.com/prittamravi/converge/internal/snapshot"
-	"github.com/prittamravi/converge/internal/store"
+	"github.com/prit3010/converge/internal/config"
+	"github.com/prit3010/converge/internal/db"
+	"github.com/prit3010/converge/internal/eval"
+	"github.com/prit3010/converge/internal/snapshot"
+	"github.com/prit3010/converge/internal/store"
 )
 
 const defaultBranchName = "main"

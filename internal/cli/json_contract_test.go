@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/prittamravi/converge/internal/config"
+	"github.com/prit3010/converge/internal/config"
 )
 
 func TestRunSnapJSONEnvelope(t *testing.T) {

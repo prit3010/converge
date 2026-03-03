@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/diff"
-	"github.com/prittamravi/converge/internal/snapshot"
+	"github.com/prit3010/converge/internal/diff"
+	"github.com/prit3010/converge/internal/snapshot"
 	"github.com/spf13/cobra"
 )
 

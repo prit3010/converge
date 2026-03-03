@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/core"
-	"github.com/prittamravi/converge/internal/db"
-	"github.com/prittamravi/converge/internal/store"
+	"github.com/prit3010/converge/internal/core"
+	"github.com/prit3010/converge/internal/db"
+	"github.com/prit3010/converge/internal/store"
 )
 
 type dataSource struct {

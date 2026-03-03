@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/config"
+	"github.com/prit3010/converge/internal/config"
 )
 
 type ProjectType string

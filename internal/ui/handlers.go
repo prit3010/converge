@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prittamravi/converge/internal/db"
-	"github.com/prittamravi/converge/internal/diff"
-	"github.com/prittamravi/converge/internal/llm"
-	"github.com/prittamravi/converge/internal/snapshot"
+	"github.com/prit3010/converge/internal/db"
+	"github.com/prit3010/converge/internal/diff"
+	"github.com/prit3010/converge/internal/llm"
+	"github.com/prit3010/converge/internal/snapshot"
 )
 
 type cellJSON struct {

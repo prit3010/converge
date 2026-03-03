@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/prittamravi/converge/internal/config"
-	"github.com/prittamravi/converge/internal/db"
+	"github.com/prit3010/converge/internal/config"
+	"github.com/prit3010/converge/internal/db"
 	"github.com/spf13/cobra"
 )
 

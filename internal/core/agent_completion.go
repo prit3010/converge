@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/prittamravi/converge/internal/db"
+	"github.com/prit3010/converge/internal/db"
 )
 
 const defaultAgentCompletionSource = "agent_complete"

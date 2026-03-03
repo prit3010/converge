@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/prittamravi/converge/internal/config"
+	"github.com/prit3010/converge/internal/config"
 )
 
 func writeJSONOutput(w io.Writer, value any) error {

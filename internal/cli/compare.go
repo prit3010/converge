@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/prittamravi/converge/internal/llm"
+	"github.com/prit3010/converge/internal/llm"
 	"github.com/spf13/cobra"
 )
 

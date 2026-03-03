@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/prittamravi/converge/internal/db"
+	"github.com/prit3010/converge/internal/db"
 )
 
 func TestRotateOnGitCommitArchivesAndCreatesTrackedBaseline(t *testing.T) {

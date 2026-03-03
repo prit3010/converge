@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/prittamravi/converge/internal/db"
-	"github.com/prittamravi/converge/internal/store"
+	"github.com/prit3010/converge/internal/db"
+	"github.com/prit3010/converge/internal/store"
 )
 
 func TestParseCompareResponse(t *testing.T) {

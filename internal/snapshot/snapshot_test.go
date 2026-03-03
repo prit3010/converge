@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/prittamravi/converge/internal/config"
-	"github.com/prittamravi/converge/internal/store"
+	"github.com/prit3010/converge/internal/config"
+	"github.com/prit3010/converge/internal/store"
 )
 
 func TestCaptureSkipsIgnoredDirs(t *testing.T) {

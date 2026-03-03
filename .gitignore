@@ -2,6 +2,13 @@
 .claude
 .codex
 .converge
-docs/
-converge
-AGENTS.md
+docs/*
+!docs/install.md
+!docs/quickstart.md
+!docs/hooks.md
+!docs/releasing.md
+!docs/plans/
+docs/plans/*
+!docs/plans/2026-03-03-v0.1-productionization.md
+/converge
+/AGENTS.md
