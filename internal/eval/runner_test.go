@@ -4,7 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/prittamravi/converge/internal/config"
 )
 
 func TestDetectProjects(t *testing.T) {
@@ -88,5 +91,51 @@ func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("write executable %s: %v", path, err)
+	}
+}
+
+func TestRunConfiguredCommandsOverridesAutoDetect(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner()
+	runner.SetPolicy(config.EvalPolicy{
+		Tests: []string{"echo ok"},
+	})
+
+	result, err := runner.Run(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("run configured checks: %v", err)
+	}
+	if !result.HasTests {
+		t.Fatalf("expected tests to be marked as run")
+	}
+	if result.TestsPassed != 1 || result.TestsFailed != 0 {
+		t.Fatalf("unexpected configured test result: %+v", result)
+	}
+	for _, skipped := range result.Skipped {
+		if strings.Contains(skipped, "no-project-detected") {
+			t.Fatalf("did not expect project auto-detect skip in override mode")
+		}
+	}
+}
+
+func TestRunConfiguredCommandsMissingCommandIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	runner := NewRunner()
+	runner.SetPolicy(config.EvalPolicy{
+		Tests: []string{"converge_nonexistent_command_xyz"},
+	})
+
+	result, err := runner.Run(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("run configured checks: %v", err)
+	}
+	if !result.HasTests {
+		t.Fatalf("expected tests flag to be true")
+	}
+	if result.TestsFailed != 0 {
+		t.Fatalf("expected missing command to be skipped, got failures=%d", result.TestsFailed)
+	}
+	if len(result.Skipped) == 0 {
+		t.Fatalf("expected skipped entry for missing configured command")
 	}
 }

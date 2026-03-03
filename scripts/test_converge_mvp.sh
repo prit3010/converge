@@ -28,7 +28,7 @@ assert_contains() {
   local haystack="$1"
   local needle="$2"
   local msg="$3"
-  grep -q "$needle" <<<"$haystack" || fail "$msg"
+  grep -Fq "$needle" <<<"$haystack" || fail "$msg"
 }
 
 TMP_DIR="$(mktemp -d)"
@@ -185,35 +185,131 @@ LOG_HOOK="$("$BIN" log --limit 1 --all --no-color)"
 echo "$LOG_HOOK"
 assert_contains "$LOG_HOOK" "agent=codex" "latest cell should record codex agent metadata"
 
-CLAUDE_TRANSCRIPT="$TMP_DIR/claude-transcript.log"
-cat >"$CLAUDE_TRANSCRIPT" <<'EOT'
-assistant: completed claude change
+latest_cell_message() {
+  "$BIN" log --limit 1 --all --no-color | awk -F'"' '/message/ {print $2; exit}'
+}
+
+echo "==> Claude hook message clarity: payload-first source"
+CLAUDE_PAYLOAD_TRANSCRIPT="$TMP_DIR/claude-transcript-payload.log"
+cat >"$CLAUDE_PAYLOAD_TRANSCRIPT" <<'EOT'
+assistant: transcript fallback text should not be used
 EOT
 
-echo "// claude-hook-$(date +%s)" >> main.go
-CLAUDE_STOP_PAYLOAD="$TMP_DIR/claude-stop.json"
-cat >"$CLAUDE_STOP_PAYLOAD" <<EJSON
-{"event":"Stop","session_id":"session-smoke-1","transcript_path":"$CLAUDE_TRANSCRIPT"}
+echo "// claude-payload-$(date +%s)" >> main.go
+CLAUDE_PAYLOAD_FILE="$TMP_DIR/claude-stop-payload.json"
+cat >"$CLAUDE_PAYLOAD_FILE" <<EJSON
+{"event":"Stop","session_id":"session-smoke-payload","transcript_path":"$CLAUDE_PAYLOAD_TRANSCRIPT","last_assistant_message":"Added archive selector in UI. Also improved hook install docs."}
 EJSON
-CLAUDE_STOP_OUT="$(
+CLAUDE_PAYLOAD_OUT="$(
   CONVERGE_BIN="$BIN" \
   CONVERGE_PROJECT_DIR="$TMP_DIR" \
-  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_STOP_PAYLOAD"
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_PAYLOAD_FILE"
 )"
-echo "$CLAUDE_STOP_OUT"
-assert_contains "$CLAUDE_STOP_OUT" "created run=" "claude Stop hook should create or record run"
+echo "$CLAUDE_PAYLOAD_OUT"
+assert_contains "$CLAUDE_PAYLOAD_OUT" "created run=" "claude payload-first hook should create or record run"
+MSG_PAYLOAD="$(latest_cell_message)"
+echo "latest Claude message: $MSG_PAYLOAD"
+assert_contains "$MSG_PAYLOAD" "Claude: Added archive selector in UI." "payload-first message should be used and prefixed"
 
-CLAUDE_END_PAYLOAD="$TMP_DIR/claude-end.json"
-cat >"$CLAUDE_END_PAYLOAD" <<EJSON
-{"event":"SessionEnd","session_id":"session-smoke-1","transcript_path":"$CLAUDE_TRANSCRIPT"}
+echo "==> Claude hook message clarity: transcript fallback with trailing metadata"
+CLAUDE_TRANSCRIPT_FALLBACK="$TMP_DIR/claude-transcript-fallback.jsonl"
+cat >"$CLAUDE_TRANSCRIPT_FALLBACK" <<'EOT'
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Refined branch compare output for readability and error triage."}]}}
+{"type":"system","message":{"role":"system","content":[{"type":"text","text":"CONVERGE_PROJECT_DIR=/tmp/work"}]}}
+{"event":"meta","payload":{"parentUuid":"8d25ab77-5ed7"}}
+EOT
+
+echo "// claude-transcript-$(date +%s)" >> main.go
+CLAUDE_TRANSCRIPT_PAYLOAD="$TMP_DIR/claude-stop-transcript.json"
+cat >"$CLAUDE_TRANSCRIPT_PAYLOAD" <<EJSON
+{"event":"Stop","session_id":"session-smoke-transcript","transcript_path":"$CLAUDE_TRANSCRIPT_FALLBACK"}
 EJSON
-CLAUDE_END_OUT="$(
+CLAUDE_TRANSCRIPT_OUT="$(
   CONVERGE_BIN="$BIN" \
   CONVERGE_PROJECT_DIR="$TMP_DIR" \
-  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_END_PAYLOAD"
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_TRANSCRIPT_PAYLOAD"
 )"
-echo "$CLAUDE_END_OUT"
-assert_contains "$CLAUDE_END_OUT" "duplicate run=" "claude SessionEnd should dedupe against Stop"
+echo "$CLAUDE_TRANSCRIPT_OUT"
+assert_contains "$CLAUDE_TRANSCRIPT_OUT" "created run=" "claude transcript fallback hook should create or record run"
+MSG_TRANSCRIPT="$(latest_cell_message)"
+echo "latest Claude message: $MSG_TRANSCRIPT"
+assert_contains "$MSG_TRANSCRIPT" "Claude: Refined branch compare output for readability and error triage." "transcript assistant text should be selected over trailing metadata"
+
+echo "==> Claude hook message clarity: structured payload rejection"
+CLAUDE_TRANSCRIPT_STRUCTURED="$TMP_DIR/claude-transcript-structured.log"
+cat >"$CLAUDE_TRANSCRIPT_STRUCTURED" <<'EOT'
+assistant: Implemented .convergeignore policy for env files and local secrets.
+EOT
+
+echo "// claude-structured-$(date +%s)" >> main.go
+CLAUDE_STRUCTURED_PAYLOAD="$TMP_DIR/claude-stop-structured.json"
+cat >"$CLAUDE_STRUCTURED_PAYLOAD" <<EJSON
+{"event":"Stop","session_id":"session-smoke-structured","transcript_path":"$CLAUDE_TRANSCRIPT_STRUCTURED","last_assistant_message":"{\"parentUuid\":\"8d25ab77-5ed7\"} CONVERGE_PROJECT_DIR=/Users/example/project"}
+EJSON
+CLAUDE_STRUCTURED_OUT="$(
+  CONVERGE_BIN="$BIN" \
+  CONVERGE_PROJECT_DIR="$TMP_DIR" \
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_STRUCTURED_PAYLOAD"
+)"
+echo "$CLAUDE_STRUCTURED_OUT"
+assert_contains "$CLAUDE_STRUCTURED_OUT" "created run=" "claude structured payload should fall back and create or record run"
+MSG_STRUCTURED="$(latest_cell_message)"
+echo "latest Claude message: $MSG_STRUCTURED"
+assert_contains "$MSG_STRUCTURED" "Claude: Implemented .convergeignore policy for env files and local secrets." "structured payload should be rejected and transcript text used"
+
+echo "==> Claude hook message clarity: deterministic fallback"
+CLAUDE_TRANSCRIPT_EMPTY="$TMP_DIR/claude-transcript-empty.jsonl"
+cat >"$CLAUDE_TRANSCRIPT_EMPTY" <<'EOT'
+{"type":"system","message":{"role":"system","content":[{"type":"text","text":"CONVERGE_PROJECT_DIR=/tmp/work"}]}}
+{"event":"meta","payload":{"parentUuid":"cbd5019f-0ae7"}}
+EOT
+
+echo "// claude-fallback-$(date +%s)" >> main.go
+CLAUDE_FALLBACK_PAYLOAD="$TMP_DIR/claude-stop-fallback.json"
+cat >"$CLAUDE_FALLBACK_PAYLOAD" <<EJSON
+{"event":"Stop","session_id":"session-smoke-fallback","transcript_path":"$CLAUDE_TRANSCRIPT_EMPTY"}
+EJSON
+CLAUDE_FALLBACK_OUT="$(
+  CONVERGE_BIN="$BIN" \
+  CONVERGE_PROJECT_DIR="$TMP_DIR" \
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_FALLBACK_PAYLOAD"
+)"
+echo "$CLAUDE_FALLBACK_OUT"
+assert_contains "$CLAUDE_FALLBACK_OUT" "created run=" "claude deterministic fallback should create or record run"
+MSG_FALLBACK="$(latest_cell_message)"
+echo "latest Claude message: $MSG_FALLBACK"
+assert_contains "$MSG_FALLBACK" "Claude: Stop completed" "fallback message should be deterministic and prefixed"
+
+echo "==> Claude hook dedupe regression (Stop then SessionEnd)"
+CLAUDE_TRANSCRIPT_DEDUPE="$TMP_DIR/claude-transcript-dedupe.log"
+cat >"$CLAUDE_TRANSCRIPT_DEDUPE" <<'EOT'
+assistant: Completed dedupe smoke run.
+EOT
+
+echo "// claude-dedupe-$(date +%s)" >> main.go
+CLAUDE_DEDUPE_STOP_PAYLOAD="$TMP_DIR/claude-stop-dedupe.json"
+cat >"$CLAUDE_DEDUPE_STOP_PAYLOAD" <<EJSON
+{"event":"Stop","session_id":"session-smoke-dedupe","transcript_path":"$CLAUDE_TRANSCRIPT_DEDUPE"}
+EJSON
+CLAUDE_DEDUPE_STOP_OUT="$(
+  CONVERGE_BIN="$BIN" \
+  CONVERGE_PROJECT_DIR="$TMP_DIR" \
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_DEDUPE_STOP_PAYLOAD"
+)"
+echo "$CLAUDE_DEDUPE_STOP_OUT"
+assert_contains "$CLAUDE_DEDUPE_STOP_OUT" "created run=" "claude Stop hook should create or record run before dedupe check"
+
+CLAUDE_DEDUPE_END_PAYLOAD="$TMP_DIR/claude-end-dedupe.json"
+cat >"$CLAUDE_DEDUPE_END_PAYLOAD" <<EJSON
+{"event":"SessionEnd","session_id":"session-smoke-dedupe","transcript_path":"$CLAUDE_TRANSCRIPT_DEDUPE"}
+EJSON
+CLAUDE_DEDUPE_END_OUT="$(
+  CONVERGE_BIN="$BIN" \
+  CONVERGE_PROJECT_DIR="$TMP_DIR" \
+  "$REPO/scripts/claude-post-response-hook.sh" < "$CLAUDE_DEDUPE_END_PAYLOAD"
+)"
+echo "$CLAUDE_DEDUPE_END_OUT"
+assert_contains "$CLAUDE_DEDUPE_END_OUT" "duplicate run=" "claude SessionEnd should dedupe against Stop"
 
 echo "==> Running watch mode smoke test"
 "$BIN" watch --debounce 400ms >"$WATCH_LOG" 2>&1 &

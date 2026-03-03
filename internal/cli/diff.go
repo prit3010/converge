@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,8 +11,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type diffFileJSON struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+	Patch  string `json:"patch,omitempty"`
+}
+
 func newDiffCmd() *cobra.Command {
 	var noColor bool
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "diff <cellA> <cellB>",
 		Short: "Show differences between two cells",
@@ -21,14 +29,15 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runDiff(cwd, args[0], args[1], noColor)
+			return runDiff(cwd, args[0], args[1], noColor, outputJSON, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors in diff output")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print machine-readable JSON output")
 	return cmd
 }
 
-func runDiff(projectDir, cellA, cellB string, noColor bool) error {
+func runDiff(projectDir, cellA, cellB string, noColor bool, outputJSON bool, out io.Writer) error {
 	svc, err := openService(projectDir)
 	if err != nil {
 		return err
@@ -36,10 +45,10 @@ func runDiff(projectDir, cellA, cellB string, noColor bool) error {
 	defer svc.DB.Close()
 
 	if _, err := svc.DB.GetCell(cellA); err != nil {
-		return fmt.Errorf("cell %s not found", cellA)
+		return notFoundErrorf("cell %s not found", cellA)
 	}
 	if _, err := svc.DB.GetCell(cellB); err != nil {
-		return fmt.Errorf("cell %s not found", cellB)
+		return notFoundErrorf("cell %s not found", cellB)
 	}
 
 	manifestAEntries, err := svc.DB.GetManifest(cellA)
@@ -60,11 +69,42 @@ func runDiff(projectDir, cellA, cellB string, noColor bool) error {
 	}
 
 	result := diff.CompareManifests(mapA, mapB)
-	palette := newDiffPalette(noColor)
+	files := make([]diffFileJSON, 0, len(result.Added)+len(result.Modified)+len(result.Removed))
+	for _, path := range result.Added {
+		files = append(files, diffFileJSON{Path: path, Status: "added"})
+	}
+	for _, path := range result.Removed {
+		files = append(files, diffFileJSON{Path: path, Status: "removed"})
+	}
+	for _, path := range result.Modified {
+		file := diffFileJSON{Path: path, Status: "modified"}
+		oldData, errOld := svc.Store.Read(mapA[path])
+		newData, errNew := svc.Store.Read(mapB[path])
+		if errOld == nil && errNew == nil && snapshot.IsText(oldData) && snapshot.IsText(newData) {
+			file.Patch = diff.UnifiedDiff(path, string(oldData), string(newData))
+		}
+		files = append(files, file)
+	}
 
 	totalChanged := len(result.Added) + len(result.Modified) + len(result.Removed)
-	fmt.Printf("%s %s %s %s\n", palette.bold("Diff"), palette.bold(cellA), palette.dim("->"), palette.bold(cellB))
-	fmt.Printf(
+	if outputJSON {
+		return writeCommandSuccessJSON(out, "diff", map[string]any{
+			"cell_a": cellA,
+			"cell_b": cellB,
+			"summary": map[string]int{
+				"added":         len(result.Added),
+				"modified":      len(result.Modified),
+				"removed":       len(result.Removed),
+				"total_changed": totalChanged,
+			},
+			"files": files,
+		})
+	}
+
+	palette := newDiffPalette(noColor)
+	fmt.Fprintf(out, "%s %s %s %s\n", palette.bold("Diff"), palette.bold(cellA), palette.dim("->"), palette.bold(cellB))
+	fmt.Fprintf(
+		out,
 		"%s %s %s %s %s %s",
 		palette.dim("Summary:"),
 		palette.green(fmt.Sprintf("+%d added", len(result.Added))),
@@ -73,29 +113,29 @@ func runDiff(projectDir, cellA, cellB string, noColor bool) error {
 		palette.dim("|"),
 		fmt.Sprintf("%d total changed", totalChanged),
 	)
-	fmt.Println()
-	fmt.Println()
+	fmt.Fprintln(out)
+	fmt.Fprintln(out)
 
 	if len(result.Added) > 0 {
-		fmt.Printf("%s (%d):\n", palette.green("Added"), len(result.Added))
+		fmt.Fprintf(out, "%s (%d):\n", palette.green("Added"), len(result.Added))
 		for _, path := range result.Added {
-			fmt.Printf("  %s %s\n", palette.green("+"), path)
+			fmt.Fprintf(out, "  %s %s\n", palette.green("+"), path)
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 	}
 	if len(result.Removed) > 0 {
-		fmt.Printf("%s (%d):\n", palette.red("Removed"), len(result.Removed))
+		fmt.Fprintf(out, "%s (%d):\n", palette.red("Removed"), len(result.Removed))
 		for _, path := range result.Removed {
-			fmt.Printf("  %s %s\n", palette.red("-"), path)
+			fmt.Fprintf(out, "  %s %s\n", palette.red("-"), path)
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 	}
 	if len(result.Modified) > 0 {
-		fmt.Printf("%s (%d):\n", palette.yellow("Modified"), len(result.Modified))
+		fmt.Fprintf(out, "%s (%d):\n", palette.yellow("Modified"), len(result.Modified))
 		for _, path := range result.Modified {
-			fmt.Printf("  %s %s\n", palette.yellow("~"), path)
+			fmt.Fprintf(out, "  %s %s\n", palette.yellow("~"), path)
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 
 		for _, path := range result.Modified {
 			oldData, err := svc.Store.Read(mapA[path])
@@ -107,19 +147,19 @@ func runDiff(projectDir, cellA, cellB string, noColor bool) error {
 				continue
 			}
 			if !snapshot.IsText(oldData) || !snapshot.IsText(newData) {
-				fmt.Printf("%s %s\n", palette.dim("binary diff skipped for"), path)
+				fmt.Fprintf(out, "%s %s\n", palette.dim("binary diff skipped for"), path)
 				continue
 			}
 			unified := diff.UnifiedDiff(path, string(oldData), string(newData))
 			if unified != "" {
-				fmt.Printf("%s %s\n", palette.cyan("Patch:"), palette.bold(path))
-				fmt.Println(colorizeUnifiedDiff(unified, palette))
-				fmt.Println()
+				fmt.Fprintf(out, "%s %s\n", palette.cyan("Patch:"), palette.bold(path))
+				fmt.Fprintln(out, colorizeUnifiedDiff(unified, palette))
+				fmt.Fprintln(out)
 			}
 		}
 	}
 	if len(result.Added) == 0 && len(result.Modified) == 0 && len(result.Removed) == 0 {
-		fmt.Println(palette.green("No differences."))
+		fmt.Fprintln(out, palette.green("No differences."))
 	}
 	return nil
 }

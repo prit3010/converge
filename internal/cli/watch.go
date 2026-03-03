@@ -42,8 +42,8 @@ func runWatch(projectDir string, debounce time.Duration) error {
 	defer stop()
 
 	fmt.Printf("Watching %s (debounce %s). Press Ctrl+C to stop.\n", projectDir, debounce)
-	return watch.Watch(ctx, projectDir, debounce, func() error {
-		if svc.IsRestoreInProgress() {
+	return watch.Watch(ctx, projectDir, debounce, svc.ShouldIgnore, func() error {
+		if svc.IsRestoreInProgress() || svc.IsArchiveInProgress() {
 			return nil
 		}
 		cell, created, err := svc.CreateCellIfChanged(context.Background(), core.SnapOptions{

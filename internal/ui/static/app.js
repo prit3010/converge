@@ -1,6 +1,8 @@
 (() => {
   const dagEl = document.getElementById("dag");
   const panelEl = document.getElementById("detail-panel");
+  const archiveSelectEl = document.getElementById("archive-select");
+  const archiveModeBannerEl = document.getElementById("archive-mode-banner");
   const branchSelectEl = document.getElementById("branch-select");
   const zoomLevelEl = document.getElementById("zoom-level");
   const zoomInEl = document.getElementById("zoom-in");
@@ -26,7 +28,7 @@
   const winnerPanelEl = document.getElementById("winner-panel");
   const lineagePanelEl = document.getElementById("lineage-panel");
 
-  if (!dagEl || !panelEl || !branchSelectEl) {
+  if (!dagEl || !panelEl || !branchSelectEl || !archiveSelectEl) {
     return;
   }
 
@@ -36,9 +38,11 @@
 
   let allCells = [];
   let allBranches = [];
+  let allArchives = [];
   let uiSummary = null;
   let compareStart = null;
   let didRunDefaultCompare = false;
+  let selectedArchiveID = "current";
 
   const manualCompare = {
     cellA: "",
@@ -70,7 +74,11 @@
     bindTabs();
     setPanelTab("lineage");
     bindLineageToggle();
+    bindArchiveSelector();
 
+    await loadArchives();
+    renderArchiveSelector();
+    renderArchiveMode();
     await loadData();
     renderBranchFilter();
     renderWinnerCockpit();
@@ -198,6 +206,70 @@
     });
   }
 
+  function bindArchiveSelector() {
+    archiveSelectEl.onchange = async () => {
+      selectedArchiveID = archiveSelectEl.value || "current";
+      await reloadArchiveData();
+    };
+  }
+
+  async function loadArchives() {
+    const resp = await fetch("/api/archives");
+    if (!resp.ok) {
+      throw new Error(`/api/archives failed: ${resp.status}`);
+    }
+    allArchives = await resp.json();
+    if (!allArchives.some((entry) => entry.id === selectedArchiveID)) {
+      selectedArchiveID = "current";
+    }
+  }
+
+  function renderArchiveSelector() {
+    archiveSelectEl.innerHTML = "";
+    for (const archive of allArchives) {
+      const option = document.createElement("option");
+      option.value = archive.id;
+      if (archive.current) {
+        option.textContent = "Current";
+      } else {
+        const commit = archive.commit_sha ? archive.commit_sha.slice(0, 8) : "";
+        const branch = archive.branch ? ` ${archive.branch}` : "";
+        option.textContent = commit
+          ? `${archive.id} (${commit}${branch})`
+          : archive.id;
+      }
+      archiveSelectEl.appendChild(option);
+    }
+    archiveSelectEl.value = selectedArchiveID;
+  }
+
+  function renderArchiveMode() {
+    const selected = allArchives.find((entry) => entry.id === selectedArchiveID);
+    const isCurrent = !selected || selected.current || selected.id === "current";
+    if (!archiveModeBannerEl) {
+      return;
+    }
+    if (isCurrent) {
+      archiveModeBannerEl.hidden = true;
+      archiveModeBannerEl.textContent = "Viewing archived graph (read-only)";
+      return;
+    }
+    archiveModeBannerEl.hidden = false;
+    archiveModeBannerEl.textContent = `Viewing archive ${selected.id} (read-only)`;
+  }
+
+  async function reloadArchiveData() {
+    compareStart = null;
+    didRunDefaultCompare = false;
+    await loadData();
+    renderArchiveMode();
+    renderBranchFilter();
+    renderWinnerCockpit();
+    renderCompareSelectors();
+    renderGraph();
+    await applyInitialWinnerState();
+  }
+
   function setPanelTab(panel) {
     if (!experienceEl) {
       return;
@@ -223,9 +295,9 @@
 
   async function loadData() {
     const [cellsResp, branchesResp, summaryResp] = await Promise.all([
-      fetch("/api/cells"),
-      fetch("/api/branches"),
-      fetch("/api/ui/summary"),
+      fetch(withArchive("/api/cells")),
+      fetch(withArchive("/api/branches")),
+      fetch(withArchive("/api/ui/summary")),
     ]);
 
     if (!cellsResp.ok) {
@@ -247,6 +319,12 @@
     if (!uiSummary) {
       uiSummary = buildFallbackSummary();
     }
+  }
+
+  function withArchive(path) {
+    const archive = encodeURIComponent(selectedArchiveID || "current");
+    const join = path.includes("?") ? "&" : "?";
+    return `${path}${join}archive=${archive}`;
   }
 
   function buildFallbackSummary() {
@@ -280,10 +358,10 @@
       branchSelectEl.appendChild(opt);
     }
 
-    branchSelectEl.addEventListener("change", () => {
+    branchSelectEl.onchange = () => {
       compareStart = null;
       renderGraph();
-    });
+    };
   }
 
   function renderWinnerCockpit() {
@@ -1071,7 +1149,7 @@
   }
 
   async function renderCellDetail(id) {
-    const resp = await fetch(`/api/cell/${encodeURIComponent(id)}`);
+    const resp = await fetch(withArchive(`/api/cell/${encodeURIComponent(id)}`));
     if (!resp.ok) {
       panelEl.innerHTML = `<div class="placeholder">Unable to load cell ${escapeHtml(id)}.</div>`;
       return;
@@ -1104,7 +1182,9 @@
       cellA,
     )}</strong> and <strong>${escapeHtml(cellB)}</strong>...</div>`;
 
-    const diffResp = await fetch(`/api/diff/${encodeURIComponent(cellA)}/${encodeURIComponent(cellB)}`);
+    const diffResp = await fetch(
+      withArchive(`/api/diff/${encodeURIComponent(cellA)}/${encodeURIComponent(cellB)}`),
+    );
     const diffs = diffResp.ok ? await diffResp.json() : [];
 
     const blocks = diffs
@@ -1140,7 +1220,7 @@
       const compareResp = await fetch("/api/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cell_a: cellA, cell_b: cellB }),
+        body: JSON.stringify({ cell_a: cellA, cell_b: cellB, archive: selectedArchiveID }),
       });
       const result = await compareResp.json();
       if (!compareResp.ok || result.error) {

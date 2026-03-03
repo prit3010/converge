@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prittamravi/converge/internal/config"
 	"github.com/prittamravi/converge/internal/db"
 	"github.com/prittamravi/converge/internal/eval"
 	"github.com/prittamravi/converge/internal/snapshot"
@@ -21,17 +22,46 @@ type Service struct {
 	Snapshot  *snapshot.Snapshot
 	Evaluator *eval.Runner
 
+	Policy config.Policy
+
 	ProjectDir string
 }
 
 func NewService(projectDir string, database *db.DB, objectStore *store.Store, evaluator *eval.Runner) *Service {
+	if evaluator == nil {
+		evaluator = eval.NewRunner()
+	}
+	policy := config.DefaultPolicy()
+	evaluator.SetPolicy(policy.Eval)
 	return &Service{
 		DB:         database,
 		Store:      objectStore,
-		Snapshot:   snapshot.New(objectStore),
+		Snapshot:   snapshot.NewWithPolicy(objectStore, policy),
 		Evaluator:  evaluator,
+		Policy:     policy,
 		ProjectDir: projectDir,
 	}
+}
+
+func (s *Service) SetPolicy(policy config.Policy) {
+	s.Policy = policy
+	if s.Snapshot != nil {
+		s.Snapshot.SetPolicy(policy)
+	}
+	if s.Evaluator != nil {
+		s.Evaluator.SetPolicy(policy.Eval)
+	}
+}
+
+func (s *Service) ShouldIgnore(relPath string, isDir bool) bool {
+	return s.Policy.ShouldIgnore(relPath, isDir)
+}
+
+func (s *Service) LastSnapshotSkipped() []snapshot.SkipReason {
+	if s.Snapshot == nil {
+		return nil
+	}
+	return s.Snapshot.LastSkipped()
 }
 
 func (s *Service) ActiveBranch() (string, error) {

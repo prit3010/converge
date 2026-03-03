@@ -2,13 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
 func newBranchesCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+	cmd := &cobra.Command{
 		Use:   "branches",
 		Short: "List branches and their head cells",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -16,12 +18,14 @@ func newBranchesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runBranches(cwd)
+			return runBranches(cwd, outputJSON, cmd.OutOrStdout())
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print machine-readable JSON output")
+	return cmd
 }
 
-func runBranches(projectDir string) error {
+func runBranches(projectDir string, outputJSON bool, out io.Writer) error {
 	svc, err := openService(projectDir)
 	if err != nil {
 		return err
@@ -38,8 +42,20 @@ func runBranches(projectDir string) error {
 		return err
 	}
 	if len(branches) == 0 {
-		fmt.Println("No branches found.")
+		if outputJSON {
+			return writeCommandSuccessJSON(out, "branches", map[string]any{
+				"active_branch": activeBranch,
+				"branches":      []any{},
+			})
+		}
+		fmt.Fprintln(out, "No branches found.")
 		return nil
+	}
+	if outputJSON {
+		return writeCommandSuccessJSON(out, "branches", map[string]any{
+			"active_branch": activeBranch,
+			"branches":      branches,
+		})
 	}
 
 	for _, b := range branches {
@@ -51,7 +67,7 @@ func runBranches(projectDir string) error {
 		if b.HeadCellID != nil {
 			head = *b.HeadCellID
 		}
-		fmt.Printf("%s%-20s head: %s\n", marker, b.Name, head)
+		fmt.Fprintf(out, "%s%-20s head: %s\n", marker, b.Name, head)
 	}
 	return nil
 }

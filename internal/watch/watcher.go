@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/prittamravi/converge/internal/config"
 )
 
 type Debouncer struct {
@@ -35,14 +33,16 @@ func (d *Debouncer) Trigger() {
 
 type OnChange func() error
 
-func Watch(ctx context.Context, projectDir string, debounce time.Duration, onChange OnChange) error {
+type IgnoreFunc func(relPath string, isDir bool) bool
+
+func Watch(ctx context.Context, projectDir string, debounce time.Duration, ignore IgnoreFunc, onChange OnChange) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
 	defer watcher.Close()
 
-	if err := addDirsRecursive(watcher, projectDir); err != nil {
+	if err := addDirsRecursive(watcher, projectDir, ignore); err != nil {
 		return err
 	}
 
@@ -66,13 +66,13 @@ func Watch(ctx context.Context, projectDir string, debounce time.Duration, onCha
 			if !ok {
 				return nil
 			}
-			if isIgnoredPath(projectDir, event.Name) {
+			if isIgnoredPath(projectDir, event.Name, false, ignore) {
 				continue
 			}
 			if event.Has(fsnotify.Create) {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-					if !isIgnoredPath(projectDir, event.Name) {
-						_ = addDirsRecursive(watcher, event.Name)
+					if !isIgnoredPath(projectDir, event.Name, true, ignore) {
+						_ = addDirsRecursive(watcher, event.Name, ignore)
 					}
 				}
 			}
@@ -88,7 +88,7 @@ func Watch(ctx context.Context, projectDir string, debounce time.Duration, onCha
 	}
 }
 
-func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
+func addDirsRecursive(watcher *fsnotify.Watcher, root string, ignore IgnoreFunc) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -96,7 +96,7 @@ func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
 		if !d.IsDir() {
 			return nil
 		}
-		if path != root && isIgnoredPath(root, path) {
+		if path != root && isIgnoredPath(root, path, true, ignore) {
 			return filepath.SkipDir
 		}
 		if err := watcher.Add(path); err != nil {
@@ -106,20 +106,17 @@ func addDirsRecursive(watcher *fsnotify.Watcher, root string) error {
 	})
 }
 
-func isIgnoredPath(projectDir, path string) bool {
+func isIgnoredPath(projectDir, path string, isDir bool, ignore IgnoreFunc) bool {
+	if ignore == nil {
+		return false
+	}
 	rel, err := filepath.Rel(projectDir, path)
 	if err != nil {
 		return false
 	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." {
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." || rel == "" {
 		return false
 	}
-	parts := strings.Split(rel, "/")
-	for _, part := range parts {
-		if _, ignored := config.IgnoredDirNames[part]; ignored {
-			return true
-		}
-	}
-	return false
+	return ignore(rel, isDir)
 }

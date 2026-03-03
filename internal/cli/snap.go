@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/prittamravi/converge/internal/core"
+	"github.com/prittamravi/converge/internal/snapshot"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +17,7 @@ func newSnapCmd() *cobra.Command {
 	var tags string
 	var agent string
 	var runEval bool
+	var outputJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "snap",
@@ -24,18 +27,24 @@ func newSnapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runSnap(cwd, message, tags, agent, runEval)
+			return runSnap(cwd, message, tags, agent, runEval, outputJSON, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Cell message")
 	cmd.Flags().StringVar(&tags, "tags", "", "Comma-separated tags")
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent identifier")
 	cmd.Flags().BoolVar(&runEval, "eval", true, "Run evaluation after snapshot")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print machine-readable JSON output")
 	_ = cmd.MarkFlagRequired("message")
 	return cmd
 }
 
-func runSnap(projectDir, message, tags, agent string, runEval bool) error {
+type snapJSON struct {
+	Cell    any                   `json:"cell"`
+	Skipped []snapshot.SkipReason `json:"skipped,omitempty"`
+}
+
+func runSnap(projectDir, message, tags, agent string, runEval bool, outputJSON bool, out io.Writer) error {
 	svc, err := openService(projectDir)
 	if err != nil {
 		return err
@@ -52,16 +61,30 @@ func runSnap(projectDir, message, tags, agent string, runEval bool) error {
 	if err != nil {
 		return fmt.Errorf("create cell: %w", err)
 	}
+	skipped := svc.LastSnapshotSkipped()
+	if outputJSON {
+		payload := snapJSON{
+			Cell:    cell,
+			Skipped: skipped,
+		}
+		return writeCommandSuccessJSON(out, "snap", payload)
+	}
 
-	fmt.Printf("Created %s: %q\n", cell.ID, cell.Message)
-	fmt.Printf("  Branch: %s\n", cell.Branch)
-	fmt.Printf("  Files: %d (+%d ~%d -%d)  Lines: +%d/-%d\n", cell.TotalFiles, cell.FilesAdded, cell.FilesModified, cell.FilesRemoved, cell.LinesAdded, cell.LinesRemoved)
-	fmt.Printf("  LOC total: %d  delta: %+d\n", cell.TotalLOC, cell.LOCDelta)
+	fmt.Fprintf(out, "Created %s: %q\n", cell.ID, cell.Message)
+	fmt.Fprintf(out, "  Branch: %s\n", cell.Branch)
+	fmt.Fprintf(out, "  Files: %d (+%d ~%d -%d)  Lines: +%d/-%d\n", cell.TotalFiles, cell.FilesAdded, cell.FilesModified, cell.FilesRemoved, cell.LinesAdded, cell.LinesRemoved)
+	fmt.Fprintf(out, "  LOC total: %d  delta: %+d\n", cell.TotalLOC, cell.LOCDelta)
 	if runEval {
 		if cell.EvalRan {
-			fmt.Println("  Eval: completed")
+			fmt.Fprintln(out, "  Eval: completed")
 		} else {
-			fmt.Println("  Eval: requested (see converge eval for details)")
+			fmt.Fprintln(out, "  Eval: requested (see converge eval for details)")
+		}
+	}
+	if len(skipped) > 0 {
+		fmt.Fprintln(out, "  Skipped by policy:")
+		for _, item := range skipped {
+			fmt.Fprintf(out, "    - %s (%s)\n", item.Path, item.Reason)
 		}
 	}
 	return nil

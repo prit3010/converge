@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -52,6 +53,19 @@ type branchJSON struct {
 	Active     bool   `json:"active"`
 }
 
+type archiveJSON struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Current     bool   `json:"current"`
+	ReadOnly    bool   `json:"read_only"`
+	CommitSHA   string `json:"commit_sha,omitempty"`
+	Branch      string `json:"branch,omitempty"`
+	Subject     string `json:"subject,omitempty"`
+	CommittedAt string `json:"committed_at,omitempty"`
+	ArchivedAt  string `json:"archived_at,omitempty"`
+	CellCount   int    `json:"cell_count"`
+}
+
 type diffJSON struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
@@ -81,7 +95,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPICells(w http.ResponseWriter, r *http.Request) {
-	cells, err := s.svc.DB.ListAllCells()
+	src, ok := s.dataSourceFromRequest(w, r)
+	if !ok {
+		return
+	}
+	defer src.Close()
+
+	cells, err := src.DB.ListAllCells()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -93,14 +113,47 @@ func (s *Server) handleAPICells(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+func (s *Server) handleAPIArchives(w http.ResponseWriter, r *http.Request) {
+	currentCells, err := s.svc.DB.CountCells()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	archives, err := s.svc.ListArchiveMetadata()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	out := make([]archiveJSON, 0, len(archives)+1)
+	out = append(out, archiveJSON{
+		ID:        "current",
+		Label:     "Current",
+		Current:   true,
+		ReadOnly:  false,
+		CellCount: currentCells,
+	})
+	for _, archive := range archives {
+		out = append(out, toArchiveOptionJSON(archive))
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) handleAPICell(w http.ResponseWriter, r *http.Request) {
+	src, ok := s.dataSourceFromRequest(w, r)
+	if !ok {
+		return
+	}
+	defer src.Close()
+
 	id := r.PathValue("id")
-	cell, err := s.svc.DB.GetCell(id)
+	cell, err := src.DB.GetCell(id)
 	if err != nil {
 		http.Error(w, "cell not found", http.StatusNotFound)
 		return
 	}
-	manifest, err := s.svc.DB.GetManifest(id)
+	manifest, err := src.DB.GetManifest(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -114,15 +167,21 @@ func (s *Server) handleAPICell(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIDiff(w http.ResponseWriter, r *http.Request) {
+	src, ok := s.dataSourceFromRequest(w, r)
+	if !ok {
+		return
+	}
+	defer src.Close()
+
 	cellA := r.PathValue("cellA")
 	cellB := r.PathValue("cellB")
 
-	manifestA, err := s.svc.DB.GetManifest(cellA)
+	manifestA, err := src.DB.GetManifest(cellA)
 	if err != nil {
 		http.Error(w, "cell A not found", http.StatusNotFound)
 		return
 	}
-	manifestB, err := s.svc.DB.GetManifest(cellB)
+	manifestB, err := src.DB.GetManifest(cellB)
 	if err != nil {
 		http.Error(w, "cell B not found", http.StatusNotFound)
 		return
@@ -146,8 +205,8 @@ func (s *Server) handleAPIDiff(w http.ResponseWriter, r *http.Request) {
 		diffs = append(diffs, diffJSON{Path: p, Status: "removed"})
 	}
 	for _, p := range result.Modified {
-		oldData, errOld := s.svc.Store.Read(mapA[p])
-		newData, errNew := s.svc.Store.Read(mapB[p])
+		oldData, errOld := src.Store.Read(mapA[p])
+		newData, errNew := src.Store.Read(mapB[p])
 		patch := ""
 		if errOld == nil && errNew == nil && snapshot.IsText(oldData) && snapshot.IsText(newData) {
 			patch = diff.UnifiedDiff(p, string(oldData), string(newData))
@@ -158,12 +217,14 @@ func (s *Server) handleAPIDiff(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIBranches(w http.ResponseWriter, r *http.Request) {
-	activeBranch, err := s.svc.ActiveBranch()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	src, ok := s.dataSourceFromRequest(w, r)
+	if !ok {
 		return
 	}
-	branches, err := s.svc.DB.ListBranches()
+	defer src.Close()
+
+	activeBranch := activeBranchForDB(src.DB)
+	branches, err := src.DB.ListBranches()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -180,19 +241,19 @@ func (s *Server) handleAPIBranches(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIUISummary(w http.ResponseWriter, r *http.Request) {
-	activeBranch, err := s.svc.ActiveBranch()
+	src, ok := s.dataSourceFromRequest(w, r)
+	if !ok {
+		return
+	}
+	defer src.Close()
+
+	activeBranch := activeBranchForDB(src.DB)
+	cells, err := src.DB.ListAllCells()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	cells, err := s.svc.DB.ListAllCells()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	branches, err := s.svc.DB.ListBranches()
+	branches, err := src.DB.ListBranches()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -222,6 +283,9 @@ func (s *Server) handleAPICompare(w http.ResponseWriter, r *http.Request) {
 		CellB        string `json:"cell_b"`
 		Model        string `json:"model"`
 		MaxDiffLines int    `json:"max_diff_lines"`
+		Archive      string `json:"archive"`
+		ArchiveA     string `json:"archive_a"`
+		ArchiveB     string `json:"archive_b"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -234,10 +298,41 @@ func (s *Server) handleAPICompare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	archiveID := archiveIDFromQuery(req.Archive)
+	archiveA := strings.TrimSpace(req.ArchiveA)
+	archiveB := strings.TrimSpace(req.ArchiveB)
+	if archiveA != "" || archiveB != "" {
+		left := archiveID
+		right := archiveID
+		if archiveA != "" {
+			left = archiveIDFromQuery(archiveA)
+		}
+		if archiveB != "" {
+			right = archiveIDFromQuery(archiveB)
+		}
+		if left != right {
+			http.Error(w, "cross-archive compare is not supported", http.StatusBadRequest)
+			return
+		}
+		archiveID = left
+	}
+
+	src, err := s.openDataSource(archiveID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			http.Error(w, "archive not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer src.Close()
+
 	ctx, cancel := context.WithTimeout(r.Context(), apiCompareTimeout)
 	defer cancel()
 
-	result, err := s.comparer.Compare(ctx, req.CellA, req.CellB, llm.CompareOptions{
+	comparer := llm.NewComparer(src.DB, src.Store)
+	result, err := comparer.Compare(ctx, req.CellA, req.CellB, llm.CompareOptions{
 		Model:        strings.TrimSpace(req.Model),
 		MaxDiffLines: req.MaxDiffLines,
 	})
@@ -255,6 +350,19 @@ func (s *Server) handleAPICompare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, result)
+}
+
+func (s *Server) dataSourceFromRequest(w http.ResponseWriter, r *http.Request) (*dataSource, bool) {
+	src, err := s.openDataSource(r.URL.Query().Get("archive"))
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			http.Error(w, "archive not found", http.StatusNotFound)
+			return nil, false
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, false
+	}
+	return src, true
 }
 
 func toCellJSON(c db.Cell) cellJSON {

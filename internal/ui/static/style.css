@@ -85,6 +85,7 @@ body {
 }
 
 #branch-select,
+#archive-select,
 #compare-a-select,
 #compare-b-select {
   width: 100%;
@@ -99,6 +100,21 @@ body {
 
 #branch-select {
   min-width: 210px;
+}
+
+#archive-select {
+  min-width: 220px;
+}
+
+.archive-banner {
+  border-bottom: 1px solid #d7c79f;
+  background: #fff5da;
+  color: #734f00;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 8px 14px;
 }
 
 .mobile-tabs {

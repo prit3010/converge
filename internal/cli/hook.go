@@ -8,5 +8,6 @@ func newHookCmd() *cobra.Command {
 		Short: "Hook entrypoints for agent integrations",
 	}
 	cmd.AddCommand(newHookCompleteCmd())
+	cmd.AddCommand(newHookGitCommitCmd())
 	return cmd
 }

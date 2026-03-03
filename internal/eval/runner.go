@@ -2,12 +2,15 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/prittamravi/converge/internal/config"
 )
 
 type ProjectType string
@@ -71,14 +74,25 @@ func (r Result) SkippedPtr() *string {
 	return &joined
 }
 
-type Runner struct{}
+type Runner struct {
+	policy config.EvalPolicy
+}
 
 func NewRunner() *Runner {
 	return &Runner{}
 }
 
+func (r *Runner) SetPolicy(policy config.EvalPolicy) {
+	r.policy = policy
+}
+
 func (r *Runner) Run(ctx context.Context, projectDir string) (Result, error) {
 	res := Result{}
+	if r.policy.HasOverrides() {
+		r.runConfiguredChecks(ctx, projectDir, &res)
+		return res, nil
+	}
+
 	projects := DetectProjects(projectDir)
 	if len(projects) == 0 {
 		res.Skipped = append(res.Skipped, "no-project-detected")
@@ -97,6 +111,60 @@ func (r *Runner) Run(ctx context.Context, projectDir string) (Result, error) {
 	}
 
 	return res, nil
+}
+
+func (r *Runner) runConfiguredChecks(ctx context.Context, projectDir string, res *Result) {
+	runTests := normalizeCommandList(r.policy.Tests)
+	runLint := normalizeCommandList(r.policy.Lint)
+	runTypes := normalizeCommandList(r.policy.Types)
+
+	if len(runTests) > 0 {
+		res.HasTests = true
+		for _, command := range runTests {
+			out, err := runShellCmd(ctx, projectDir, command)
+			if isMissingShellCommand(err) {
+				res.Skipped = append(res.Skipped, "tests:"+command)
+				continue
+			}
+			if err != nil {
+				res.TestsFailed++
+				continue
+			}
+			if passed, failed := parseGoTestOutput(out); passed > 0 || failed > 0 {
+				res.TestsPassed += passed
+				res.TestsFailed += failed
+			} else if passed, failed := parsePytestSummary(out); passed > 0 || failed > 0 {
+				res.TestsPassed += passed
+				res.TestsFailed += failed
+			} else {
+				res.TestsPassed++
+			}
+		}
+	}
+
+	if len(runLint) > 0 {
+		res.HasLint = true
+		for _, command := range runLint {
+			out, err := runShellCmd(ctx, projectDir, command)
+			if isMissingShellCommand(err) {
+				res.Skipped = append(res.Skipped, "lint:"+command)
+				continue
+			}
+			res.LintErrors += conservativeProblemCount(out, err)
+		}
+	}
+
+	if len(runTypes) > 0 {
+		res.HasTypes = true
+		for _, command := range runTypes {
+			out, err := runShellCmd(ctx, projectDir, command)
+			if isMissingShellCommand(err) {
+				res.Skipped = append(res.Skipped, "types:"+command)
+				continue
+			}
+			res.TypeErrors += conservativeProblemCount(out, err)
+		}
+	}
 }
 
 func DetectProjects(dir string) []ProjectType {
@@ -214,6 +282,21 @@ func runCmd(ctx context.Context, dir string, name string, args ...string) (strin
 	return string(out), err
 }
 
+func runShellCmd(ctx context.Context, dir string, command string) (string, error) {
+	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func isMissingShellCommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 127
+}
+
 func resolveTool(name string) (string, bool) {
 	path, err := exec.LookPath(name)
 	if err == nil {
@@ -277,4 +360,16 @@ func parsePytestSummary(output string) (int, int) {
 		fmt.Sscanf(m[1], "%d", &failed)
 	}
 	return passed, failed
+}
+
+func normalizeCommandList(commands []string) []string {
+	out := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		trimmed := strings.TrimSpace(cmd)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
 }

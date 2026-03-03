@@ -264,6 +264,14 @@ func (d *DB) LatestCellByBranch(branch string) (*Cell, error) {
 	return cell, nil
 }
 
+func (d *DB) CountCells() (int, error) {
+	var count int
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM cells`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count cells: %w", err)
+	}
+	return count, nil
+}
+
 func (d *DB) ListCells(limit int) ([]Cell, error) {
 	if limit <= 0 {
 		limit = 20

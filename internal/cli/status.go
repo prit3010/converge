@@ -3,13 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var outputJSON bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show status relative to latest cell",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -17,12 +19,14 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runStatus(cwd)
+			return runStatus(cwd, outputJSON, cmd.OutOrStdout())
 		},
 	}
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print machine-readable JSON output")
+	return cmd
 }
 
-func runStatus(projectDir string) error {
+func runStatus(projectDir string, outputJSON bool, out io.Writer) error {
 	svc, err := openService(projectDir)
 	if err != nil {
 		return err
@@ -42,28 +46,47 @@ func runStatus(projectDir string) error {
 	if err != nil {
 		return err
 	}
-	if latest == nil {
-		fmt.Printf("Active branch: %s\n", activeBranch)
-		fmt.Println("No cells yet. Run 'converge snap -m \"message\"' to create one.")
-		return nil
-	}
-
 	headCellID := ""
 	if branchRecord.HeadCellID != nil {
 		headCellID = *branchRecord.HeadCellID
 	}
-	fmt.Printf("Active branch: %s", activeBranch)
-	if headCellID != "" {
-		fmt.Printf(" (head %s)", headCellID)
+	if latest == nil {
+		if outputJSON {
+			return writeCommandSuccessJSON(out, "status", map[string]any{
+				"active_branch": activeBranch,
+				"head_cell_id":  headCellID,
+				"has_cells":     false,
+				"clean":         true,
+				"delta":         delta,
+			})
+		}
+		fmt.Fprintf(out, "Active branch: %s\n", activeBranch)
+		fmt.Fprintln(out, "No cells yet. Run 'converge snap -m \"message\"' to create one.")
+		return nil
 	}
-	fmt.Println()
-	fmt.Printf("Last cell: [%s] %s %q\n", latest.ID, latest.Timestamp, latest.Message)
-	fmt.Printf("  branch: %s\n", latest.Branch)
-	fmt.Printf("  complexity(LOC): %d (delta %+d)\n", latest.TotalLOC, latest.LOCDelta)
+	if outputJSON {
+		return writeCommandSuccessJSON(out, "status", map[string]any{
+			"active_branch": activeBranch,
+			"head_cell_id":  headCellID,
+			"has_cells":     true,
+			"latest_cell":   latest,
+			"delta":         delta,
+			"clean":         delta.Modified+delta.Added+delta.Removed == 0,
+		})
+	}
+
+	fmt.Fprintf(out, "Active branch: %s", activeBranch)
+	if headCellID != "" {
+		fmt.Fprintf(out, " (head %s)", headCellID)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Last cell: [%s] %s %q\n", latest.ID, latest.Timestamp, latest.Message)
+	fmt.Fprintf(out, "  branch: %s\n", latest.Branch)
+	fmt.Fprintf(out, "  complexity(LOC): %d (delta %+d)\n", latest.TotalLOC, latest.LOCDelta)
 	if delta.Modified+delta.Added+delta.Removed == 0 {
-		fmt.Println("  Working tree is clean (matches last cell)")
+		fmt.Fprintln(out, "  Working tree is clean (matches last cell)")
 	} else {
-		fmt.Printf("  Changes since last cell: %d modified, %d new, %d deleted\n", delta.Modified, delta.Added, delta.Removed)
+		fmt.Fprintf(out, "  Changes since last cell: %d modified, %d new, %d deleted\n", delta.Modified, delta.Added, delta.Removed)
 	}
 	return nil
 }

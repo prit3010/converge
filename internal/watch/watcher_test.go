@@ -36,10 +36,13 @@ func TestDebouncerCoalescesEvents(t *testing.T) {
 
 func TestIsIgnoredPath(t *testing.T) {
 	root := "/tmp/project"
-	if !isIgnoredPath(root, filepath.Join(root, ".converge", "db")) {
+	ignore := func(relPath string, isDir bool) bool {
+		return relPath == ".converge" || strings.HasPrefix(relPath, ".converge/")
+	}
+	if !isIgnoredPath(root, filepath.Join(root, ".converge", "db"), false, ignore) {
 		t.Fatalf("expected .converge path to be ignored")
 	}
-	if isIgnoredPath(root, filepath.Join(root, "pkg", "main.go")) {
+	if isIgnoredPath(root, filepath.Join(root, "pkg", "main.go"), false, ignore) {
 		t.Fatalf("did not expect pkg/main.go to be ignored")
 	}
 }
@@ -57,7 +60,7 @@ func TestWatchReturnsCallbackError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Watch(ctx, projectDir, 25*time.Millisecond, func() error {
+		errCh <- Watch(ctx, projectDir, 25*time.Millisecond, nil, func() error {
 			return sentinel
 		})
 	}()
@@ -96,7 +99,7 @@ func TestWatchCallbacksDoNotOverlap(t *testing.T) {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- Watch(ctx, projectDir, 20*time.Millisecond, func() error {
+		errCh <- Watch(ctx, projectDir, 20*time.Millisecond, nil, func() error {
 			current := atomic.AddInt32(&inflight, 1)
 			for {
 				previous := atomic.LoadInt32(&maxInflight)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/prittamravi/converge/internal/core"
 	"github.com/prittamravi/converge/internal/db"
@@ -115,6 +116,110 @@ func TestAPICompareWithoutKeyReturnsGracefulError(t *testing.T) {
 	}
 	if _, ok := result["error"]; !ok {
 		t.Fatalf("expected error key in response: %v", result)
+	}
+}
+
+func TestAPIArchivesIncludesCurrentAndArchived(t *testing.T) {
+	svc := newUITestService(t)
+	archiveID := "a_20260302T120000Z_deadbeef"
+	createArchiveFixtureState(t, svc, archiveID, "archived-main.go", "archived cell")
+
+	server, err := NewServer(svc)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/archives", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archives status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var archives []archiveJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &archives); err != nil {
+		t.Fatalf("decode archives json: %v", err)
+	}
+	if len(archives) < 2 {
+		t.Fatalf("expected at least current + one archive, got %d", len(archives))
+	}
+	if archives[0].ID != "current" || !archives[0].Current {
+		t.Fatalf("expected first archive option to be current, got %+v", archives[0])
+	}
+	found := false
+	for _, archive := range archives {
+		if archive.ID == archiveID {
+			found = true
+			if !archive.ReadOnly {
+				t.Fatalf("expected archive %s to be read-only", archiveID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected archive %s in response: %+v", archiveID, archives)
+	}
+}
+
+func TestAPICellsArchiveSelectionIsolation(t *testing.T) {
+	svc := newUITestService(t)
+	if err := os.WriteFile(filepath.Join(svc.ProjectDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	if _, err := svc.CreateCell(context.Background(), core.SnapOptions{Message: "current cell", RunEval: false}); err != nil {
+		t.Fatalf("create current cell: %v", err)
+	}
+
+	archiveID := "a_20260302T130000Z_abcd1234"
+	createArchiveFixtureState(t, svc, archiveID, "archived.go", "archived cell")
+
+	server, err := NewServer(svc)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	currentReq := httptest.NewRequest(http.MethodGet, "/api/cells?archive=current", nil)
+	currentRec := httptest.NewRecorder()
+	server.ServeHTTP(currentRec, currentReq)
+	if currentRec.Code != http.StatusOK {
+		t.Fatalf("current cells status = %d body=%s", currentRec.Code, currentRec.Body.String())
+	}
+	var currentCells []cellJSON
+	if err := json.Unmarshal(currentRec.Body.Bytes(), &currentCells); err != nil {
+		t.Fatalf("decode current cells: %v", err)
+	}
+	if len(currentCells) != 1 || currentCells[0].Message != "current cell" {
+		t.Fatalf("expected current dataset cell message 'current cell', got %+v", currentCells)
+	}
+
+	archiveReq := httptest.NewRequest(http.MethodGet, "/api/cells?archive="+archiveID, nil)
+	archiveRec := httptest.NewRecorder()
+	server.ServeHTTP(archiveRec, archiveReq)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive cells status = %d body=%s", archiveRec.Code, archiveRec.Body.String())
+	}
+	var archivedCells []cellJSON
+	if err := json.Unmarshal(archiveRec.Body.Bytes(), &archivedCells); err != nil {
+		t.Fatalf("decode archive cells: %v", err)
+	}
+	if len(archivedCells) != 1 || archivedCells[0].Message != "archived cell" {
+		t.Fatalf("expected archive dataset cell message 'archived cell', got %+v", archivedCells)
+	}
+}
+
+func TestAPICompareRejectsCrossArchiveRequests(t *testing.T) {
+	svc := newUITestService(t)
+	server, err := NewServer(svc)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"cell_a":"c_000001","cell_b":"c_000002","archive_a":"current","archive_b":"a_20260302T130000Z_abcd1234"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/compare", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for cross-archive compare, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -247,6 +352,73 @@ func TestPickWinnerCellFallsBackToLatestWithoutEval(t *testing.T) {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+func createArchiveFixtureState(t *testing.T, svc *core.Service, archiveID string, filePath string, message string) {
+	t.Helper()
+
+	archiveRoot := filepath.Join(svc.ProjectDir, ".converge", "archives", archiveID)
+	objectsDir := filepath.Join(archiveRoot, "objects")
+	if err := os.MkdirAll(objectsDir, 0o755); err != nil {
+		t.Fatalf("mkdir archive objects: %v", err)
+	}
+
+	archiveDB, err := db.Open(filepath.Join(archiveRoot, "converge.db"))
+	if err != nil {
+		t.Fatalf("open archive db: %v", err)
+	}
+	defer archiveDB.Close()
+
+	archiveStore := store.New(objectsDir)
+	content := []byte("package archived\n")
+	hash, err := archiveStore.Write(content)
+	if err != nil {
+		t.Fatalf("write archive object: %v", err)
+	}
+
+	cell := db.Cell{
+		ID:            "c_000001",
+		Sequence:      1,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
+		Message:       message,
+		Source:        "manual",
+		Branch:        "main",
+		FilesAdded:    1,
+		FilesModified: 0,
+		FilesRemoved:  0,
+		LinesAdded:    1,
+		LinesRemoved:  0,
+		TotalLOC:      1,
+		LOCDelta:      1,
+		TotalFiles:    1,
+	}
+	entries := []db.ManifestEntry{{
+		CellID: cell.ID,
+		Path:   filePath,
+		Hash:   hash,
+		Mode:   0o644,
+		Size:   int64(len(content)),
+	}}
+	if err := archiveDB.InsertCellWithManifestAndAdvanceBranch(cell, entries); err != nil {
+		t.Fatalf("insert archive cell: %v", err)
+	}
+
+	meta := core.ArchiveMeta{
+		ArchiveID:   archiveID,
+		CommitSHA:   "deadbeefcafebabe",
+		Branch:      "main",
+		Subject:     "archive fixture",
+		CommittedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+		ArchivedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		CellCount:   1,
+	}
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal archive metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(archiveRoot, "meta.json"), append(metaData, '\n'), 0o644); err != nil {
+		t.Fatalf("write archive metadata file: %v", err)
+	}
 }
 
 func newUITestService(t *testing.T) *core.Service {

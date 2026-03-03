@@ -8,14 +8,12 @@ import (
 	"net/http"
 
 	"github.com/prittamravi/converge/internal/core"
-	"github.com/prittamravi/converge/internal/llm"
 )
 
 type Server struct {
-	svc      *core.Service
-	comparer *llm.Comparer
-	tmpl     *template.Template
-	mux      *http.ServeMux
+	svc  *core.Service
+	tmpl *template.Template
+	mux  *http.ServeMux
 }
 
 func NewServer(svc *core.Service) (*Server, error) {
@@ -25,10 +23,9 @@ func NewServer(svc *core.Service) (*Server, error) {
 	}
 
 	s := &Server{
-		svc:      svc,
-		comparer: llm.NewComparer(svc.DB, svc.Store),
-		tmpl:     tmpl,
-		mux:      http.NewServeMux(),
+		svc:  svc,
+		tmpl: tmpl,
+		mux:  http.NewServeMux(),
 	}
 	s.routes()
 	return s, nil
@@ -58,6 +55,7 @@ func (s *Server) routes() {
 	}
 	s.mux.HandleFunc("GET /", s.handleIndex)
 	s.mux.HandleFunc("GET /api/cells", s.handleAPICells)
+	s.mux.HandleFunc("GET /api/archives", s.handleAPIArchives)
 	s.mux.HandleFunc("GET /api/cell/{id}", s.handleAPICell)
 	s.mux.HandleFunc("GET /api/diff/{cellA}/{cellB}", s.handleAPIDiff)
 	s.mux.HandleFunc("GET /api/branches", s.handleAPIBranches)

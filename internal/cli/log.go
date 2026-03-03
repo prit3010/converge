@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ func newLogCmd() *cobra.Command {
 	var noColor bool
 	var branch string
 	var showAll bool
+	var outputJSON bool
 	cmd := &cobra.Command{
 		Use:   "log",
 		Short: "Show cell history",
@@ -22,17 +24,18 @@ func newLogCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runLog(cwd, limit, noColor, branch, showAll)
+			return runLog(cwd, limit, noColor, branch, showAll, outputJSON, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of cells to print")
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors in log output")
 	cmd.Flags().StringVar(&branch, "branch", "", "Show history for a specific branch")
 	cmd.Flags().BoolVar(&showAll, "all", false, "Show history across all branches")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print machine-readable JSON output")
 	return cmd
 }
 
-func runLog(projectDir string, limit int, noColor bool, branch string, showAll bool) error {
+func runLog(projectDir string, limit int, noColor bool, branch string, showAll bool, outputJSON bool, out io.Writer) error {
 	svc, err := openService(projectDir)
 	if err != nil {
 		return err
@@ -40,7 +43,7 @@ func runLog(projectDir string, limit int, noColor bool, branch string, showAll b
 	defer svc.DB.Close()
 
 	if showAll && strings.TrimSpace(branch) != "" {
-		return fmt.Errorf("cannot use --branch and --all together")
+		return validationErrorf("cannot use --branch and --all together")
 	}
 
 	activeBranch, err := svc.ActiveBranch()
@@ -67,31 +70,44 @@ func runLog(projectDir string, limit int, noColor bool, branch string, showAll b
 	if err != nil {
 		return err
 	}
+	if outputJSON {
+		return writeCommandSuccessJSON(out, "log", map[string]any{
+			"active_branch": activeBranch,
+			"head_cell_id":  headCellID,
+			"scope": map[string]any{
+				"all":    showAll,
+				"branch": targetBranch,
+				"limit":  limit,
+			},
+			"cells": cells,
+		})
+	}
+
 	if len(cells) == 0 {
 		if showAll {
-			fmt.Println("No cells yet. Run 'converge snap -m \"message\"' to create one.")
+			fmt.Fprintln(out, "No cells yet. Run 'converge snap -m \"message\"' to create one.")
 		} else {
-			fmt.Printf("No cells on branch %q yet. Run 'converge snap -m \"message\"' to create one.\n", targetBranch)
+			fmt.Fprintf(out, "No cells on branch %q yet. Run 'converge snap -m \"message\"' to create one.\n", targetBranch)
 		}
 		return nil
 	}
 
 	palette := newLogPalette(noColor)
 	if showAll {
-		fmt.Printf("Showing %d most recent cells across all branches (active: %s)\n\n", len(cells), activeBranch)
+		fmt.Fprintf(out, "Showing %d most recent cells across all branches (active: %s)\n\n", len(cells), activeBranch)
 	} else {
-		fmt.Printf("Showing %d most recent cells on branch %s\n\n", len(cells), targetBranch)
+		fmt.Fprintf(out, "Showing %d most recent cells on branch %s\n\n", len(cells), targetBranch)
 	}
 	for i, cell := range cells {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(out)
 		}
-		printCell(cell, cell.ID == headCellID, palette)
+		printCell(out, cell, cell.ID == headCellID, palette)
 	}
 	return nil
 }
 
-func printCell(cell db.Cell, isHead bool, palette logPalette) {
+func printCell(out io.Writer, cell db.Cell, isHead bool, palette logPalette) {
 	headLabel := ""
 	if isHead {
 		headLabel = "  " + palette.green("HEAD")
@@ -100,20 +116,20 @@ func printCell(cell db.Cell, isHead bool, palette logPalette) {
 	if strings.TrimSpace(cell.Branch) != "" {
 		branchLabel = "  " + palette.cyan("["+cell.Branch+"]")
 	}
-	fmt.Printf("[%s]%s%s\n", palette.bold(cell.ID), headLabel, branchLabel)
-	fmt.Printf("  %s : %s\n", palette.dim("time"), cell.Timestamp)
-	fmt.Printf("  %s : %q\n", palette.dim("message"), cell.Message)
+	fmt.Fprintf(out, "[%s]%s%s\n", palette.bold(cell.ID), headLabel, branchLabel)
+	fmt.Fprintf(out, "  %s : %s\n", palette.dim("time"), cell.Timestamp)
+	fmt.Fprintf(out, "  %s : %q\n", palette.dim("message"), cell.Message)
 
-	fmt.Printf("  %s : source=%s", palette.dim("metadata"), palette.cyan(cell.Source))
+	fmt.Fprintf(out, "  %s : source=%s", palette.dim("metadata"), palette.cyan(cell.Source))
 	if cell.Agent != nil {
-		fmt.Printf(" | agent=%s", palette.cyan(*cell.Agent))
+		fmt.Fprintf(out, " | agent=%s", palette.cyan(*cell.Agent))
 	}
 	if cell.Tags != nil {
-		fmt.Printf(" | tags=%s", palette.cyan(*cell.Tags))
+		fmt.Fprintf(out, " | tags=%s", palette.cyan(*cell.Tags))
 	}
-	fmt.Println()
+	fmt.Fprintln(out)
 
-	fmt.Printf("  %s : files %s %s %s | lines %s %s\n",
+	fmt.Fprintf(out, "  %s : files %s %s %s | lines %s %s\n",
 		palette.dim("changes"),
 		palette.green(fmt.Sprintf("+%d", cell.FilesAdded)),
 		palette.yellow(fmt.Sprintf("~%d", cell.FilesModified)),
@@ -129,11 +145,11 @@ func printCell(cell db.Cell, isHead bool, palette logPalette) {
 	} else {
 		locDelta = palette.yellow(locDelta)
 	}
-	fmt.Printf("  complexity(LOC): total %d (delta %s) across %d files\n", cell.TotalLOC, locDelta, cell.TotalFiles)
+	fmt.Fprintf(out, "  complexity(LOC): total %d (delta %s) across %d files\n", cell.TotalLOC, locDelta, cell.TotalFiles)
 
 	switch {
 	case cell.EvalRequested && !cell.EvalRan:
-		fmt.Printf("  %s : %s\n", palette.dim("eval"), palette.yellow("pending"))
+		fmt.Fprintf(out, "  %s : %s\n", palette.dim("eval"), palette.yellow("pending"))
 	case cell.EvalRan:
 		parts := make([]string, 0, 4)
 		if cell.TestsPassed != nil || cell.TestsFailed != nil {
@@ -178,12 +194,12 @@ func printCell(cell db.Cell, isHead bool, palette logPalette) {
 			parts = append(parts, palette.red(fmt.Sprintf("error %s", *cell.EvalError)))
 		}
 		if len(parts) == 0 {
-			fmt.Printf("  %s : %s\n", palette.dim("eval"), palette.green("complete"))
+			fmt.Fprintf(out, "  %s : %s\n", palette.dim("eval"), palette.green("complete"))
 		} else {
-			fmt.Printf("  %s : %s\n", palette.dim("eval"), strings.Join(parts, " | "))
+			fmt.Fprintf(out, "  %s : %s\n", palette.dim("eval"), strings.Join(parts, " | "))
 		}
 	default:
-		fmt.Printf("  %s : %s\n", palette.dim("eval"), "not requested")
+		fmt.Fprintf(out, "  %s : %s\n", palette.dim("eval"), "not requested")
 	}
 }
 

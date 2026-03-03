@@ -36,6 +36,13 @@ func runInit(projectDir string) error {
 	}
 	defer database.Close()
 
+	ignorePath := filepath.Join(projectDir, config.IgnoreFileName)
+	if _, err := os.Stat(ignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(ignorePath, []byte(config.DefaultConvergeIgnoreTemplate), 0o644); err != nil {
+			return fmt.Errorf("create %s: %w", config.IgnoreFileName, err)
+		}
+	}
+
 	fmt.Printf("Initialized converge in %s\n", stateDir)
 	return nil
 }
