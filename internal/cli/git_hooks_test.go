@@ -15,7 +15,6 @@ func TestRunGitHooksInstallPreservesExistingAndIsIdempotent(t *testing.T) {
 	requireGitForCLI(t)
 	projectDir := t.TempDir()
 	initGitRepoForCLI(t, projectDir)
-	createClaudeHookScriptForCLI(t, projectDir)
 
 	hooksDir, err := resolveGitHooksDir(projectDir)
 	if err != nil {
@@ -40,7 +39,7 @@ func TestRunGitHooksInstallPreservesExistingAndIsIdempotent(t *testing.T) {
 	if resolved, err := os.Executable(); err == nil && strings.TrimSpace(resolved) != "" {
 		convergeBin = filepath.Clean(resolved)
 	}
-	scriptPath := filepath.Join(projectDir, "scripts", "claude-post-response-hook.sh")
+	scriptPath := filepath.Join(projectDir, hookScriptsDirName, "claude-post-response-hook.sh")
 	expectedCommand := "CONVERGE_BIN=" + convergeBin + " CONVERGE_PROJECT_DIR=" + projectDir + " " + scriptPath
 
 	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
@@ -50,6 +49,25 @@ func TestRunGitHooksInstallPreservesExistingAndIsIdempotent(t *testing.T) {
 	}
 	if countClaudeEventCommand(settings, "SessionEnd", expectedCommand) != 1 {
 		t.Fatalf("expected SessionEnd event command installed exactly once")
+	}
+
+	for _, scriptName := range []string{"claude-post-response-hook.sh", "converge-post-commit-hook.sh"} {
+		script := filepath.Join(projectDir, hookScriptsDirName, scriptName)
+		info, err := os.Stat(script)
+		if err != nil {
+			t.Fatalf("stat script %s: %v", scriptName, err)
+		}
+		if info.IsDir() {
+			t.Fatalf("expected file for script %s", scriptName)
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Fatalf("expected script %s to be executable, mode=%o", scriptName, info.Mode().Perm())
+		}
+	}
+
+	legacyScriptsDir := filepath.Join(projectDir, legacyScriptsDirName)
+	if _, err := os.Stat(legacyScriptsDir); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy scripts dir to remain absent for fresh installs")
 	}
 
 	preservedPath := filepath.Join(hooksDir, preservedPostCommitHook)
@@ -94,11 +112,155 @@ func TestRunGitHooksInstallPreservesExistingAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRunGitHooksInstallMigratesLegacyClaudeScript(t *testing.T) {
+	requireGitForCLI(t)
+	projectDir := t.TempDir()
+	initGitRepoForCLI(t, projectDir)
+
+	legacyScriptPath := filepath.Join(projectDir, legacyScriptsDirName, "claude-post-response-hook.sh")
+	if err := os.MkdirAll(filepath.Dir(legacyScriptPath), 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+	existingScript := "#!/usr/bin/env bash\necho custom\n"
+	if err := os.WriteFile(legacyScriptPath, []byte(existingScript), 0o755); err != nil {
+		t.Fatalf("write custom claude hook script: %v", err)
+	}
+
+	if err := runGitHooksInstall(projectDir, io.Discard); err != nil {
+		t.Fatalf("install git hooks: %v", err)
+	}
+
+	scriptPath := filepath.Join(projectDir, hookScriptsDirName, "claude-post-response-hook.sh")
+	content, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read custom claude hook script: %v", err)
+	}
+	if string(content) != existingScript {
+		t.Fatalf("expected claude hook script content to be migrated from legacy scripts path")
+	}
+}
+
+func TestRunGitHooksInstallOutsideGitRepoDoesNotCreateScripts(t *testing.T) {
+	projectDir := t.TempDir()
+
+	if err := runGitHooksInstall(projectDir, io.Discard); err == nil {
+		t.Fatalf("expected install to fail outside git repo")
+	}
+
+	for _, dirName := range []string{hookScriptsDirName, legacyScriptsDirName} {
+		dirPath := filepath.Join(projectDir, dirName)
+		if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to not be created outside git repo", dirPath)
+		}
+	}
+}
+
+func TestRunGitHooksInstallGitOnlySkipsClaudeSettings(t *testing.T) {
+	requireGitForCLI(t)
+	projectDir := t.TempDir()
+	initGitRepoForCLI(t, projectDir)
+
+	if err := runGitHooksInstallGit(projectDir, io.Discard); err != nil {
+		t.Fatalf("install git hooks only: %v", err)
+	}
+
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no claude settings for git-only install")
+	}
+
+	postCommitScript := filepath.Join(projectDir, hookScriptsDirName, "converge-post-commit-hook.sh")
+	if _, err := os.Stat(postCommitScript); err != nil {
+		t.Fatalf("expected post-commit hook script to be installed for git-only install: %v", err)
+	}
+	claudeScript := filepath.Join(projectDir, hookScriptsDirName, "claude-post-response-hook.sh")
+	if _, err := os.Stat(claudeScript); !os.IsNotExist(err) {
+		t.Fatalf("expected claude hook script to remain absent for git-only install")
+	}
+}
+
+func TestRunClaudeHooksInstallOnlyCreatesClaudeSettings(t *testing.T) {
+	projectDir := t.TempDir()
+
+	if err := runClaudeHooksInstall(projectDir, io.Discard); err != nil {
+		t.Fatalf("install claude hooks only: %v", err)
+	}
+
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+	settings := loadClaudeSettingsForCLI(t, settingsPath)
+	if hooksRoot, ok := settings["hooks"].(map[string]any); !ok || len(hooksRoot) == 0 {
+		t.Fatalf("expected hooks config to be written for claude install")
+	}
+
+	claudeScript := filepath.Join(projectDir, hookScriptsDirName, "claude-post-response-hook.sh")
+	if _, err := os.Stat(claudeScript); err != nil {
+		t.Fatalf("expected claude hook script to be installed: %v", err)
+	}
+	postCommitScript := filepath.Join(projectDir, hookScriptsDirName, "converge-post-commit-hook.sh")
+	if _, err := os.Stat(postCommitScript); !os.IsNotExist(err) {
+		t.Fatalf("expected post-commit script to remain absent for claude-only install")
+	}
+
+	hooksDir := filepath.Join(projectDir, ".git", "hooks")
+	if _, err := os.Stat(hooksDir); !os.IsNotExist(err) {
+		t.Fatalf("expected no git hook directory for claude-only install")
+	}
+}
+
+func TestRunClaudeHooksInstallRemovesLegacyScriptCommand(t *testing.T) {
+	projectDir := t.TempDir()
+	convergeBin := "converge"
+	if resolved, err := os.Executable(); err == nil && strings.TrimSpace(resolved) != "" {
+		convergeBin = filepath.Clean(resolved)
+	}
+
+	legacyScriptPath := filepath.Join(projectDir, legacyScriptsDirName, "claude-post-response-hook.sh")
+	if err := os.MkdirAll(filepath.Dir(legacyScriptPath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy scripts dir: %v", err)
+	}
+	if err := os.WriteFile(legacyScriptPath, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write legacy script: %v", err)
+	}
+
+	legacyCommand := "CONVERGE_BIN=" + convergeBin + " CONVERGE_PROJECT_DIR=" + projectDir + " " + legacyScriptPath
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir claude dir: %v", err)
+	}
+	raw := `{
+  "hooks": {
+    "Stop": [{"matcher":"*","hooks":[{"type":"command","command":"` + legacyCommand + `"}]}],
+    "SessionEnd": [{"matcher":"*","hooks":[{"type":"command","command":"` + legacyCommand + `"}]}]
+  }
+}`
+	if err := os.WriteFile(settingsPath, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write legacy settings: %v", err)
+	}
+
+	if err := runClaudeHooksInstall(projectDir, io.Discard); err != nil {
+		t.Fatalf("install claude hooks only: %v", err)
+	}
+
+	newCommand := "CONVERGE_BIN=" + convergeBin + " CONVERGE_PROJECT_DIR=" + projectDir + " " + filepath.Join(projectDir, hookScriptsDirName, "claude-post-response-hook.sh")
+	settings := loadClaudeSettingsForCLI(t, settingsPath)
+	if countClaudeEventCommand(settings, "Stop", legacyCommand) != 0 {
+		t.Fatalf("expected legacy Stop command to be removed")
+	}
+	if countClaudeEventCommand(settings, "SessionEnd", legacyCommand) != 0 {
+		t.Fatalf("expected legacy SessionEnd command to be removed")
+	}
+	if countClaudeEventCommand(settings, "Stop", newCommand) != 1 {
+		t.Fatalf("expected new Stop command to be installed once")
+	}
+	if countClaudeEventCommand(settings, "SessionEnd", newCommand) != 1 {
+		t.Fatalf("expected new SessionEnd command to be installed once")
+	}
+}
+
 func TestRunHookGitCommitIncludesReplayOnFailure(t *testing.T) {
 	requireGitForCLI(t)
 	projectDir := t.TempDir()
 	initGitRepoForCLI(t, projectDir)
-	createClaudeHookScriptForCLI(t, projectDir)
 
 	if err := runInit(projectDir); err != nil {
 		t.Fatalf("run init: %v", err)
@@ -170,17 +332,6 @@ func gitOutputForCLI(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func createClaudeHookScriptForCLI(t *testing.T, projectDir string) {
-	t.Helper()
-	scriptPath := filepath.Join(projectDir, "scripts", "claude-post-response-hook.sh")
-	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
-		t.Fatalf("mkdir scripts dir: %v", err)
-	}
-	if err := os.WriteFile(scriptPath, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write claude hook script: %v", err)
-	}
 }
 
 func loadClaudeSettingsForCLI(t *testing.T, path string) map[string]any {

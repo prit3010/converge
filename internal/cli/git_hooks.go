@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,13 @@ const (
 	managedPostCommitMarker = "CONVERGE_MANAGED_POST_COMMIT"
 	preservedPostCommitHook = "post-commit.user"
 	claudeSettingsPath      = ".claude/settings.local.json"
+	hookScriptsDirName      = "converge_scripts"
+	legacyScriptsDirName    = "scripts"
+)
+
+var (
+	//go:embed hook_scripts/*.sh
+	embeddedHookScripts embed.FS
 )
 
 func newGitHooksCmd() *cobra.Command {
@@ -25,13 +33,15 @@ func newGitHooksCmd() *cobra.Command {
 		Short:   "Manage git and Claude hook integrations",
 	}
 	cmd.AddCommand(newGitHooksInstallCmd())
+	cmd.AddCommand(newGitHooksInstallGitCmd())
+	cmd.AddCommand(newGitHooksInstallClaudeCmd())
 	return cmd
 }
 
 func newGitHooksInstallCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Install Converge git and Claude hook integrations",
+		Short: "Install both git and Claude hook integrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -42,9 +52,47 @@ func newGitHooksInstallCmd() *cobra.Command {
 	}
 }
 
+func newGitHooksInstallGitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "install-git",
+		Short: "Install only managed git post-commit hook integration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			return runGitHooksInstallGit(cwd, cmd.OutOrStdout())
+		},
+	}
+}
+
+func newGitHooksInstallClaudeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "install-claude",
+		Short: "Install only Claude hook integration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			return runClaudeHooksInstall(cwd, cmd.OutOrStdout())
+		},
+	}
+}
+
 func runGitHooksInstall(projectDir string, out io.Writer) error {
+	if err := runGitHooksInstallGit(projectDir, out); err != nil {
+		return err
+	}
+	return runClaudeHooksInstall(projectDir, out)
+}
+
+func runGitHooksInstallGit(projectDir string, out io.Writer) error {
 	hooksDir, err := resolveGitHooksDir(projectDir)
 	if err != nil {
+		return err
+	}
+	if _, err := ensureProjectHookScript(projectDir, "converge-post-commit-hook.sh", out); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
@@ -81,10 +129,54 @@ func runGitHooksInstall(projectDir string, out io.Writer) error {
 
 	fmt.Fprintf(out, "Installed Converge post-commit hook at %s\n", targetHook)
 	fmt.Fprintf(out, "Managed hook chains preserved hook at %s when present\n", preservedHook)
-	if err := installClaudeHooks(projectDir, out); err != nil {
-		return err
-	}
 	return nil
+}
+
+func ensureProjectHookScript(projectDir, scriptName string, out io.Writer) (string, error) {
+	scriptPath := filepath.Join(projectDir, hookScriptsDirName, scriptName)
+	info, err := os.Stat(scriptPath)
+	if err == nil {
+		if info.IsDir() {
+			return "", fmt.Errorf("hook script path is a directory: %s", scriptPath)
+		}
+		return scriptPath, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat hook script %s: %w", scriptPath, err)
+	}
+
+	var content []byte
+	legacyPath := filepath.Join(projectDir, legacyScriptsDirName, scriptName)
+	legacyInfo, legacyErr := os.Stat(legacyPath)
+	switch {
+	case legacyErr == nil:
+		if legacyInfo.IsDir() {
+			return "", fmt.Errorf("legacy hook script path is a directory: %s", legacyPath)
+		}
+		content, err = os.ReadFile(legacyPath)
+		if err != nil {
+			return "", fmt.Errorf("read legacy hook script %s: %w", legacyPath, err)
+		}
+	case os.IsNotExist(legacyErr):
+		content, err = embeddedHookScripts.ReadFile(filepath.Join("hook_scripts", scriptName))
+		if err != nil {
+			return "", fmt.Errorf("load embedded hook script %s: %w", scriptName, err)
+		}
+	default:
+		return "", fmt.Errorf("stat legacy hook script %s: %w", legacyPath, legacyErr)
+	}
+	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
+		return "", fmt.Errorf("create hook scripts directory: %w", err)
+	}
+	if err := os.WriteFile(scriptPath, content, 0o755); err != nil {
+		return "", fmt.Errorf("write hook script %s: %w", scriptPath, err)
+	}
+	if legacyErr == nil {
+		fmt.Fprintf(out, "Migrated Converge hook script from %s to %s\n", legacyPath, scriptPath)
+	} else {
+		fmt.Fprintf(out, "Installed Converge hook script at %s\n", scriptPath)
+	}
+	return scriptPath, nil
 }
 
 func isManagedPostCommit(content []byte) bool {
@@ -109,7 +201,7 @@ if [[ -f "$USER_HOOK" ]]; then
 fi
 
 PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-HOOK_SCRIPT="$PROJECT_DIR/scripts/converge-post-commit-hook.sh"
+HOOK_SCRIPT="$PROJECT_DIR/%s/converge-post-commit-hook.sh"
 if [[ ! -f "$HOOK_SCRIPT" ]]; then
   echo "converge post-commit hook script missing: $HOOK_SCRIPT" >&2
   exit 1
@@ -124,20 +216,13 @@ fi
 if [[ $USER_STATUS -ne 0 ]]; then
   exit $USER_STATUS
 fi
-`, managedPostCommitMarker, preservedPostCommitHook)
+	`, managedPostCommitMarker, preservedPostCommitHook, hookScriptsDirName)
 }
 
-func installClaudeHooks(projectDir string, out io.Writer) error {
-	scriptPath := filepath.Join(projectDir, "scripts", "claude-post-response-hook.sh")
-	info, err := os.Stat(scriptPath)
+func runClaudeHooksInstall(projectDir string, out io.Writer) error {
+	scriptPath, err := ensureProjectHookScript(projectDir, "claude-post-response-hook.sh", out)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("claude hook script missing at %s", scriptPath)
-		}
-		return fmt.Errorf("stat claude hook script: %w", err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("claude hook script path is a directory: %s", scriptPath)
+		return err
 	}
 
 	convergeBin := "converge"
@@ -146,6 +231,7 @@ func installClaudeHooks(projectDir string, out io.Writer) error {
 	}
 
 	command := fmt.Sprintf("CONVERGE_BIN=%s CONVERGE_PROJECT_DIR=%s %s", convergeBin, projectDir, scriptPath)
+	legacyScriptPath := filepath.Join(projectDir, legacyScriptsDirName, "claude-post-response-hook.sh")
 	settingsPath := filepath.Join(projectDir, claudeSettingsPath)
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return fmt.Errorf("create .claude directory: %w", err)
@@ -164,6 +250,8 @@ func installClaudeHooks(projectDir string, out io.Writer) error {
 	}
 
 	hooks := ensureObject(root, "hooks")
+	removeHookEventCommandsContaining(hooks, "Stop", legacyScriptPath)
+	removeHookEventCommandsContaining(hooks, "SessionEnd", legacyScriptPath)
 	ensureHookEventCommand(hooks, "Stop", command)
 	ensureHookEventCommand(hooks, "SessionEnd", command)
 
@@ -261,6 +349,32 @@ func ensureHookEventCommand(hooks map[string]any, eventName, command string) {
 		"command": command,
 	})
 	entry["hooks"] = hookEntries
+}
+
+func removeHookEventCommandsContaining(hooks map[string]any, eventName, needle string) {
+	events := ensureAnyArray(hooks, eventName)
+	for _, item := range events {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		hookEntries := ensureAnyArray(entry, "hooks")
+		filtered := make([]any, 0, len(hookEntries))
+		for _, hookItem := range hookEntries {
+			hookNode, ok := hookItem.(map[string]any)
+			if !ok {
+				filtered = append(filtered, hookItem)
+				continue
+			}
+			hookType, _ := hookNode["type"].(string)
+			existingCommand, _ := hookNode["command"].(string)
+			if hookType == "command" && strings.Contains(strings.TrimSpace(existingCommand), needle) {
+				continue
+			}
+			filtered = append(filtered, hookItem)
+		}
+		entry["hooks"] = filtered
+	}
 }
 
 func arrayContainsString(values []any, target string) bool {

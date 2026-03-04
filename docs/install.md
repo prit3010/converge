@@ -1,22 +1,29 @@
 # Install Converge
 
-## Option 1 (Primary): Homebrew Cask on macOS
+## Option 1 (Primary): Homebrew Formula on macOS
 
 ```bash
 brew tap prit3010/converge
-brew install --cask converge
+brew install converge
 ```
 
 Equivalent explicit form:
 
 ```bash
-brew install --cask prit3010/converge/converge
+brew install prit3010/converge/converge
 ```
 
 Verify:
 
 ```bash
 converge version
+```
+
+If you previously installed the old cask build, remove it first:
+
+```bash
+brew uninstall --cask converge
+brew install converge
 ```
 
 ## Option 2: Go Install (macOS/Linux)
@@ -60,7 +67,7 @@ Homebrew:
 
 ```bash
 brew update
-brew upgrade --cask converge
+brew upgrade converge
 ```
 
 Go install:
@@ -74,7 +81,7 @@ go install github.com/prit3010/converge/cmd/converge@latest
 Homebrew:
 
 ```bash
-brew uninstall --cask converge
+brew uninstall converge
 brew untap prit3010/converge
 ```
 

@@ -36,7 +36,7 @@ Release workflow:
 3. re-runs tests/build,
 4. runs GoReleaser,
 5. publishes release archives + checksums,
-6. updates Homebrew Cask in `prit3010/homebrew-converge`.
+6. updates Homebrew Formula in `prit3010/homebrew-converge`.
 
 ## Required GitHub secret
 
@@ -58,10 +58,10 @@ Recommended minimal README in tap repo:
 # homebrew-converge
 
 brew tap prit3010/converge
-brew install --cask converge
+brew install converge
 ```
 
-GoReleaser will manage Cask updates in that repository.
+GoReleaser will manage Formula updates in that repository.
 
 ## Cut a release
 
@@ -78,12 +78,12 @@ Then verify:
 
 - release artifacts present in GitHub Releases,
 - `checksums.txt` present,
-- tap repo receives updated Cask,
+- tap repo receives updated Formula,
 - fresh install works:
 
 ```bash
 brew tap prit3010/converge
-brew install --cask converge
+brew install converge
 converge version
 ```
 

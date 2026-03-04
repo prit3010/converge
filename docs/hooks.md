@@ -5,12 +5,20 @@ Converge can auto-snapshot agent or git lifecycle events.
 ## Install managed hooks
 
 ```bash
+converge hooks install-git
+converge hooks install-claude
+```
+
+Or run both:
+
+```bash
 converge hooks install
 ```
 
-This installs:
+These install:
 
 - managed git `post-commit` wrapper with preserved existing-hook chaining,
+- missing project hook scripts under `converge_scripts/` (`converge-post-commit-hook.sh` and `claude-post-response-hook.sh`),
 - Claude Code hook entries in `.claude/settings.local.json` for `Stop` and `SessionEnd`.
 
 ## Manual agent completion hook
@@ -47,9 +55,9 @@ CONVERGE_HOOK_STRICT=1 scripts/codex-exec-with-hook.sh <args...>
 
 ## Claude hook script
 
-Converge includes:
+Converge installs:
 
-- `scripts/claude-post-response-hook.sh`
+- `converge_scripts/claude-post-response-hook.sh`
 
 It reads payload JSON from stdin, computes stable run ids, sanitizes summaries, and calls `converge hook complete`.
 
@@ -59,7 +67,7 @@ Hook failures are logged at:
 
 ## Git commit archive rotation
 
-After `converge hooks install`, successful commits rotate active `.converge` state into archive storage and create a fresh baseline cell from tracked files at `HEAD`.
+After `converge hooks install-git` (or `converge hooks install`), successful commits rotate active `.converge` state into archive storage and create a fresh baseline cell from tracked files at `HEAD`.
 
 Useful commands:
 

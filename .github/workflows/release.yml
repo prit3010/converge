@@ -32,7 +32,7 @@ jobs:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
-            echo "HOMEBREW_TAP_GITHUB_TOKEN is required for Homebrew Cask publishing." >&2
+            echo "HOMEBREW_TAP_GITHUB_TOKEN is required for Homebrew Formula publishing." >&2
             exit 1
           fi
 

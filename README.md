@@ -13,12 +13,19 @@ It captures each attempt as a reproducible **cell** so you can compare outcomes,
 
 ## Install
 
-### Option 1 (Primary): Homebrew (macOS)
+### Option 1 (Primary): Homebrew Formula (macOS)
 
 ```bash
 brew tap prit3010/converge
-brew install --cask converge
+brew install converge
 converge version
+```
+
+Migrating from older cask installs:
+
+```bash
+brew uninstall --cask converge
+brew install converge
 ```
 
 ### Option 2: Go install (macOS/Linux)
@@ -70,14 +77,27 @@ Converge can auto-capture snapshots when your coding harness finishes.
 From your project root:
 
 ```bash
+converge hooks install-git
+converge hooks install-claude
+```
+
+Or run both in one shot:
+
+```bash
 converge hooks install
 ```
 
-This installs:
+These install:
 
 - a managed `.git/hooks/post-commit` wrapper (preserves an existing `post-commit` hook),
+- missing `converge_scripts/converge-post-commit-hook.sh` and `converge_scripts/claude-post-response-hook.sh` in the project,
 - Claude hooks in `.claude/settings.local.json` for `Stop` and `SessionEnd`,
 - command permissions needed for the hook script to call `converge hook complete`.
+
+Notes:
+
+- Converge writes managed hook scripts to `converge_scripts/` to avoid conflicts with an app's existing `scripts/` folder.
+- If legacy hook scripts exist under `scripts/`, install migrates them into `converge_scripts/`.
 
 ### Codex
 
@@ -116,7 +136,7 @@ Releases are tag-driven.
 
 - GitHub Actions release workflow runs on tags matching `v*`.
 - Typical production tag format: `vMAJOR.MINOR.PATCH` (example: `v0.2.0`).
-- Tag push runs tests/build, then GoReleaser publishes release artifacts + checksums and updates the Homebrew Cask tap.
+- Tag push runs tests/build, then GoReleaser publishes release artifacts + checksums and updates the Homebrew Formula tap.
 
 Cut a release:
 
@@ -146,7 +166,9 @@ Release automation expects `HOMEBREW_TAP_GITHUB_TOKEN` in GitHub repo secrets.
 | `converge fork <name> --switch` | Create/switch to branch for a new attempt |
 | `converge switch <name>` | Switch branches and restore branch head |
 | `converge branches` | List branches and heads |
-| `converge hooks install` | Install managed git + Claude hooks |
+| `converge hooks install-git` | Install managed git post-commit hook (`.git/hooks/post-commit`) |
+| `converge hooks install-claude` | Install Claude Stop/SessionEnd hooks in `.claude/settings.local.json` |
+| `converge hooks install` | Install both git and Claude hooks |
 | `converge ui` | Start local dashboard |
 
 ## Storage Layout

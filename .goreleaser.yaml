@@ -59,22 +59,23 @@ changelog:
       - '^test:'
       - '^chore:'
 
-homebrew_casks:
+brews:
   - name: converge
     ids:
       - macos
-    binaries:
-      - converge
+      - linux
     repository:
       owner: prit3010
       name: homebrew-converge
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Casks
+    directory: Formula
     homepage: https://github.com/prit3010/converge
     description: Local-first experiment tracker for AI-assisted coding workflows
     license: MIT
     commit_author:
       name: converge-bot
       email: bot@users.noreply.github.com
-    url:
-      verified: github.com/prit3010/converge/
+    install: |
+      bin.install "converge"
+    test: |
+      system "#{bin}/converge", "version"
