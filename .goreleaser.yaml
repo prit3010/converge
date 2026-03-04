@@ -67,6 +67,7 @@ brews:
     repository:
       owner: prit3010
       name: homebrew-converge
+      branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/prit3010/converge
